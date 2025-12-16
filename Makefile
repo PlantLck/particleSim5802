@@ -11,8 +11,8 @@ NVCC := nvcc
 MPICC := mpic++
 
 # C++ standard and optimization
-CXXFLAGS := -std=c++17 -Wall -O3 -march=native
-NVCCFLAGS := -std=c++17 -O3
+CXXFLAGS := -std=c++14 -Wall -O3 -march=native
+NVCCFLAGS := -std=c++14 -O3 --expt-relaxed-constexpr
 
 # Platform detection and configuration
 UNAME_S := $(shell uname -s)

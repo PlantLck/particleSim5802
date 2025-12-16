@@ -9,6 +9,10 @@
 #include <cstdio>
 #include <cmath>
 
+// Forward declarations
+extern "C" void cleanup_gpu_memory();
+extern "C" void init_gpu_memory(int max_particles);
+
 // CUDA error checking macro
 #define CUDA_CHECK(call) \
     do { \
@@ -41,6 +45,21 @@ static bool gpu_initialized = false;
 // GPU Memory Management
 // ============================================================================
 
+extern "C" void cleanup_gpu_memory() {
+    if (!gpu_initialized) return;
+    
+    if (d_particles) cudaFree(d_particles);
+    if (d_grid_indices) cudaFree(d_grid_indices);
+    if (d_grid_starts) cudaFree(d_grid_starts);
+    if (d_grid_counts) cudaFree(d_grid_counts);
+    
+    d_particles = nullptr;
+    d_grid_indices = nullptr;
+    d_grid_starts = nullptr;
+    d_grid_counts = nullptr;
+    gpu_initialized = false;
+}
+
 extern "C" void init_gpu_memory(int max_particles) {
     if (gpu_initialized && gpu_max_particles >= max_particles) {
         return;
@@ -62,21 +81,6 @@ extern "C" void init_gpu_memory(int max_particles) {
     CUDA_CHECK(cudaMalloc(&d_grid_counts, grid_size * sizeof(int)));
     
     gpu_initialized = true;
-}
-
-extern "C" void cleanup_gpu_memory() {
-    if (!gpu_initialized) return;
-    
-    if (d_particles) cudaFree(d_particles);
-    if (d_grid_indices) cudaFree(d_grid_indices);
-    if (d_grid_starts) cudaFree(d_grid_starts);
-    if (d_grid_counts) cudaFree(d_grid_counts);
-    
-    d_particles = nullptr;
-    d_grid_indices = nullptr;
-    d_grid_starts = nullptr;
-    d_grid_counts = nullptr;
-    gpu_initialized = false;
 }
 
 // ============================================================================
