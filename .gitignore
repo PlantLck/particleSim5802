@@ -1,0 +1,56 @@
+# Compiled Object Files
+*.o
+*.obj
+*.cu.o
+
+# Executables
+particle_sim
+particle_sim_mpi
+particle_sim_cuda
+*.exe
+*.out
+
+# Visual Studio
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+x64/
+Debug/
+Release/
+*.suo
+*.user
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.VC.opendb
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# OS Files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Build/Test Artifacts
+benchmark_results.csv
+/tmp/
+core
+vgcore.*
+
+# SDL DLLs (Windows - download separately)
+SDL2.dll
+SDL2_ttf.dll
+*.dll
+
+# Logs
+*.log
+/logs/
