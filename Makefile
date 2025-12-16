@@ -37,29 +37,35 @@ endif
 # OpenMP support (enabled by default)
 OPENMP_FLAGS := -fopenmp
 
-# CUDA architecture detection
-# Auto-detect Jetson model or use default for desktop
+# CUDA architecture detection - IMPROVED
 ifeq ($(PLATFORM),jetson)
     # Try to detect specific Jetson model
     JETSON_MODEL := $(shell cat /etc/nv_tegra_release 2>/dev/null | grep -oP '(?<=R)[0-9]+' | head -1)
     
     ifeq ($(JETSON_MODEL),32)
-        # Jetson Nano, TX1, TX2
+        # Jetson Nano, TX1, TX2 (Maxwell/Pascal)
         CUDA_ARCH := -arch=sm_53
+        CXXFLAGS += -DJETSON_NANO
         $(info Detected: Jetson Nano/TX series - Using sm_53)
     else ifeq ($(JETSON_MODEL),35)
         # Jetson Orin
         CUDA_ARCH := -arch=sm_87
         $(info Detected: Jetson Orin series - Using sm_87)
     else
-        # Default to Xavier (most common)
+        # Default to Xavier (most common modern Jetson)
         CUDA_ARCH := -arch=sm_72
         $(info Detected: Jetson Xavier series - Using sm_72)
     endif
 else
     # Desktop GPU - use common architecture
-    CUDA_ARCH := -arch=sm_75
-    $(info Using desktop GPU architecture: sm_75 (adjust if needed))
+    CUDA_ARCH := -arch=sm_86
+    $(info Using desktop GPU architecture: sm_86 (adjust if needed))
+endif
+
+# Allow manual override
+ifdef CUDA_ARCH_OVERRIDE
+    CUDA_ARCH := $(CUDA_ARCH_OVERRIDE)
+    $(info Manual CUDA architecture override: $(CUDA_ARCH))
 endif
 
 # ============================================================================
@@ -258,8 +264,8 @@ endif
 # ============================================================================
 
 .PHONY: debug
-debug: CXXFLAGS := -std=c++17 -Wall -g -O0
-debug: NVCCFLAGS := -std=c++17 -g -G -O0
+debug: CXXFLAGS := -std=c++14 -Wall -g -O0
+debug: NVCCFLAGS := -std=c++14 -g -G -O0
 debug: all
 	@echo "✓ Debug build complete with symbols"
 
@@ -316,7 +322,7 @@ docs:
 # - sm_89: Ada Lovelace (RTX 40xx)
 
 # To override CUDA architecture:
-#   make cuda CUDA_ARCH="-arch=sm_87"
+#   make cuda CUDA_ARCH_OVERRIDE="-arch=sm_53"
 
 # For verbose compilation:
 #   make V=1
