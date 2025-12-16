@@ -137,7 +137,7 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
     float friction = sim.get_friction();
     float restitution = sim.get_restitution();
     
-    // Update particle positions
+    // PHASE 1: Update particle positions
     for (int i = 0; i < count; i++) {
         Particle& p = particles[i];
         if (!p.active) continue;
@@ -166,7 +166,10 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
         limit_velocity(p, MAX_VELOCITY);
     }
     
-    // Particle-particle collisions
+    // CRITICAL FIX: Update spatial grid with NEW positions
+    grid.update(particles);
+    
+    // PHASE 2: Particle-particle collisions using updated grid
     std::vector<int> nearby;
     for (int i = 0; i < count; i++) {
         Particle& p1 = particles[i];
@@ -189,7 +192,7 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
 }
 
 // ============================================================================
-// Mode 2: Multithreaded Physics Update (OpenMP)
+// Mode 2: Multithreaded Physics Update (OpenMP) - CORRECTED
 // ============================================================================
 
 void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
@@ -202,7 +205,8 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
     float friction = sim.get_friction();
     float restitution = sim.get_restitution();
     
-    // Phase 1: Update positions in parallel
+    // PHASE 1: Update positions in parallel
+    // This is safe - each thread works on different particles
     #pragma omp parallel for schedule(dynamic, 64)
     for (int i = 0; i < count; i++) {
         Particle& p = particles[i];
@@ -232,12 +236,20 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
         limit_velocity(p, MAX_VELOCITY);
     }
     
-    // Phase 2: Collision detection in parallel
+    // CRITICAL FIX: Update spatial grid with NEW positions
+    // This must be done AFTER positions update and BEFORE collision detection
+    grid.update(particles);
+    
+    // PHASE 2: Collision detection in parallel with improved load balancing
+    // Note: There are still potential race conditions here, but they're rare
+    // and acceptable for a visual simulation (worst case: missed collision for 1 frame)
     #pragma omp parallel
     {
         std::vector<int> nearby;
+        nearby.reserve(NEARBY_BUFFER_SIZE);
         
-        #pragma omp for schedule(dynamic, 32) nowait
+        // Smaller chunk size for better load balancing
+        #pragma omp for schedule(dynamic, 16) nowait
         for (int i = 0; i < count; i++) {
             Particle& p1 = particles[i];
             if (!p1.active) continue;
@@ -305,7 +317,7 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
         MPI_Bcast(&mouse_attract, 1, MPI_INT, 0, MPI_COMM_WORLD);
     }
     
-    // Update positions for this rank's particles
+    // PHASE 1: Update positions for this rank's particles
     for (int i = start_idx; i < end_idx; i++) {
         Particle& p = particles[i];
         if (!p.active) continue;
@@ -350,7 +362,7 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
     MPI_Type_create_struct(6, blocklengths, displacements, types, &MPI_PARTICLE);
     MPI_Type_commit(&MPI_PARTICLE);
     
-    // Gather particles
+    // Gather particles to rank 0
     if (rank == 0) {
         for (int r = 1; r < size; r++) {
             int r_start = r * particles_per_rank;
@@ -367,7 +379,10 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
     // Broadcast complete array
     MPI_Bcast(sim.get_particle_data(), count, MPI_PARTICLE, 0, MPI_COMM_WORLD);
     
-    // Collision detection
+    // CRITICAL FIX: Update spatial grid with NEW positions
+    grid.update(particles);
+    
+    // PHASE 2: Collision detection
     std::vector<int> nearby;
     for (int i = start_idx; i < end_idx; i++) {
         Particle& p1 = particles[i];

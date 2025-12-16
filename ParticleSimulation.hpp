@@ -7,26 +7,31 @@
 #include <string>
 #include <chrono>
 
-// Platform detection
-#ifdef _WIN32
-    #ifndef PLATFORM_WINDOWS
-        #define PLATFORM_WINDOWS
-    #endif
-#elif defined(__linux__)
+// ============================================================================
+// Platform Detection - Linux and Jetson Only
+// ============================================================================
+
+#if defined(__linux__)
     #define PLATFORM_LINUX
     #ifdef __arm__
         #define PLATFORM_JETSON
     #endif
+#else
+    #error "This project only supports Linux and Jetson platforms"
 #endif
 
-// Configuration constants
+// ============================================================================
+// Configuration Constants
+// ============================================================================
+
 constexpr int WINDOW_WIDTH = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 
-#ifdef PLATFORM_WINDOWS
-    constexpr int MAX_PARTICLES = 30000;  // More powerful desktop
+// Particle limits based on platform
+#ifdef PLATFORM_JETSON
+    constexpr int MAX_PARTICLES = 10000;  // Jetson embedded system
 #else
-    constexpr int MAX_PARTICLES = 10000;  // Jetson
+    constexpr int MAX_PARTICLES = 15000;  // Linux desktop with GPU
 #endif
 
 constexpr int DEFAULT_PARTICLE_COUNT = 500;
@@ -37,7 +42,10 @@ constexpr int GRID_HEIGHT = (WINDOW_HEIGHT / GRID_CELL_SIZE + 1);
 constexpr float MAX_VELOCITY = 1000.0f;
 constexpr int NEARBY_BUFFER_SIZE = 100;
 
-// Parallelization modes
+// ============================================================================
+// Parallelization Modes
+// ============================================================================
+
 enum class ParallelMode {
     SEQUENTIAL = 0,
     MULTITHREADED = 1,
@@ -46,7 +54,10 @@ enum class ParallelMode {
     GPU_COMPLEX = 4
 };
 
-// Particle structure (POD for CUDA compatibility)
+// ============================================================================
+// Particle Structure (POD for CUDA compatibility)
+// ============================================================================
+
 struct Particle {
     float x, y;              // Position
     float vx, vy;            // Velocity
@@ -59,7 +70,10 @@ struct Particle {
                  mass(0), r(0), g(0), b(0), active(false) {}
 };
 
-// Spatial Grid for collision optimization
+// ============================================================================
+// Spatial Grid for Collision Optimization
+// ============================================================================
+
 class SpatialGrid {
 private:
     std::vector<int> particle_indices;
@@ -84,7 +98,10 @@ public:
     const int* get_cell_counts() const { return cell_counts.data(); }
 };
 
-// Performance metrics
+// ============================================================================
+// Performance Metrics
+// ============================================================================
+
 struct PerformanceMetrics {
     double physics_time_ms;
     double render_time_ms;
@@ -96,7 +113,10 @@ struct PerformanceMetrics {
                           temperature_c(0), power_watts(0) {}
 };
 
-// Main simulation class
+// ============================================================================
+// Main Simulation Class
+// ============================================================================
+
 class Simulation {
 private:
     std::vector<Particle> particles;
@@ -168,7 +188,10 @@ public:
     void set_power(float power) { metrics.power_watts = power; }
 };
 
-// Physics engine interface
+// ============================================================================
+// Physics Engine Interface
+// ============================================================================
+
 class PhysicsEngine {
 public:
     static void update_sequential(Simulation& sim, float dt);
@@ -185,7 +208,10 @@ private:
     static void limit_velocity(Particle& p, float max_vel);
 };
 
-// System monitoring (platform-specific)
+// ============================================================================
+// System Monitoring (Platform-Specific)
+// ============================================================================
+
 class SystemMonitor {
 public:
     static void update_metrics(Simulation& sim);
@@ -193,14 +219,20 @@ public:
     static float read_power();
 };
 
-// Utility functions
+// ============================================================================
+// Utility Functions
+// ============================================================================
+
 class Utils {
 public:
     static double get_time_ms();
     static std::string get_mode_name(ParallelMode mode);
 };
 
-// CUDA interface (defined in physics_gpu.cu)
+// ============================================================================
+// CUDA Interface (defined in PhysicsGPU.cu)
+// ============================================================================
+
 #ifdef USE_CUDA
 extern "C" {
     void init_gpu_memory(int max_particles);

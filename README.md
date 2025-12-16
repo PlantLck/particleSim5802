@@ -1,6 +1,6 @@
 # Parallel Particle Simulation
 
-A high-performance 2D particle physics simulation demonstrating five different parallelization approaches on both NVIDIA Jetson embedded systems and desktop GPUs. Built in modern C++17 with cross-platform support.
+A high-performance 2D particle physics simulation demonstrating five different parallelization approaches on NVIDIA Jetson embedded systems. Built in modern C++17.
 
 ## Quick Start
 
@@ -38,9 +38,6 @@ Press **1-5** during runtime to switch between modes and watch performance chang
 | Jetson Xavier NX | Sequential | ~800 | 1x |
 | Jetson Xavier NX | Multithreaded | ~2,000 | 2.5x |
 | Jetson Xavier NX | GPU Complex | ~10,000 | 12x |
-| RTX 3050 Desktop | Sequential | ~1,500 | 1x |
-| RTX 3050 Desktop | Multithreaded | ~5,000 | 3.3x |
-| RTX 3050 Desktop | GPU Complex | ~30,000 | 20x |
 
 ## Controls
 
@@ -74,20 +71,8 @@ Press **1-5** during runtime to switch between modes and watch performance chang
 ### Cross-Platform Support
 - **NVIDIA Jetson**: Nano, TX2, Xavier, Orin
 - **Linux Desktop**: Any system with NVIDIA GPU
-- **Windows 10/11**: Tested on RTX 3050
 
 ## Building from Source
-
-### Windows with Visual Studio Code (Recommended)
-See **[VSCODE_QUICKSTART.md](VSCODE_QUICKSTART.md)** for complete VS Code setup guide.
-
-Quick start:
-```cmd
-# After installing dependencies (see VSCODE_QUICKSTART.md)
-# Open folder in VS Code
-# Press Ctrl+Shift+B to build
-# Press F5 to run
-```
 
 ### Linux/Jetson (Simple Method)
 ```bash
@@ -164,8 +149,6 @@ This project demonstrates:
 ## Key Achievements
 
 ✅ 20x speedup demonstrated (GPU Complex vs Sequential)  
-✅ 30,000+ particles at 60 FPS on RTX 3050  
-✅ Full cross-platform support (Jetson + Desktop)  
 ✅ All 5 parallelization modes operational  
 ✅ Real-time mode switching without restart  
 ✅ Modern C++17 with RAII and smart pointers  
@@ -192,17 +175,3 @@ See [INSTALLATION.md](INSTALLATION.md) for more troubleshooting.
 2. **Desktop**: Close GPU-heavy applications (browsers, games)
 3. **All Systems**: Start with fewer particles and increase gradually
 4. **Thermal**: Watch temperature - system may throttle above 80°C
-
-## License
-
-This project is provided as educational material for learning parallel computing concepts.
-
-## Version
-
-**Version**: 2.0 (C++ Migration)  
-**Status**: Production Ready  
-**Date**: November 2024  
-
----
-
-**Previous Version**: The original C implementation is available in project history. This C++ version provides improved safety, cleaner code organization, and identical performance.

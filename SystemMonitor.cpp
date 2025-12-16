@@ -88,30 +88,14 @@ float SystemMonitor::read_temperature() {
 
 float SystemMonitor::read_power() {
     // Power monitoring not readily available on generic Linux desktop
+    // Would require RAPL interface or specific hardware monitoring
     return 0.0f;
-}
-
-#elif defined(PLATFORM_WINDOWS)
-
-// Windows - no easy way to read these without admin privileges
-float SystemMonitor::read_temperature() {
-    return 0.0f;  // Would require WMI or admin privileges
-}
-
-float SystemMonitor::read_power() {
-    return 0.0f;  // Would require performance counters or admin privileges
 }
 
 #else
 
-// Unknown platform
-float SystemMonitor::read_temperature() {
-    return 0.0f;
-}
-
-float SystemMonitor::read_power() {
-    return 0.0f;
-}
+// Unsupported platform
+#error "Unsupported platform - only Linux and Jetson are supported"
 
 #endif
 

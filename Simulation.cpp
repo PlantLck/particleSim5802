@@ -134,8 +134,9 @@ void Simulation::update(float dt) {
     }
     
     if (running) {
-        // Update spatial grid
-        grid->update(particles);
+        // CRITICAL FIX: Grid update moved INSIDE each physics mode
+        // Each mode now updates grid AFTER position updates and BEFORE collision detection
+        // This ensures collision detection uses current positions, not stale data
         
         // Call appropriate physics update based on mode
         switch (mode) {
