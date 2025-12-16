@@ -157,10 +157,15 @@ extern "C" void init_gpu_memory(int max_particles) {
     size_t particle_size = max_particles * sizeof(Particle);
     CUDA_CHECK(cudaMallocManaged(&d_particles, particle_size));
     
-    // Prefetch to GPU for better initial performance
-    int device;
-    cudaGetDevice(&device);
-    CUDA_CHECK(cudaMemPrefetchAsync(d_particles, particle_size, device, 0));
+    // Optional prefetch for better initial performance
+    // Skip if device initialization fails (non-critical optimization)
+    int device = 0;
+    cudaError_t err = cudaGetDevice(&device);
+    if (err == cudaSuccess) {
+        // Prefetch is optional - if it fails, unified memory still works
+        cudaMemPrefetchAsync(d_particles, particle_size, device, 0);
+        // Ignore prefetch errors - not critical for functionality
+    }
     
     total_gpu_memory_bytes += particle_size;
     
@@ -181,11 +186,10 @@ extern "C" void init_gpu_memory(int max_particles) {
     gpu_initialized = true;
     
     printf("[GPU] UNIFIED MEMORY initialized: %.2f MB total\n", total_gpu_memory_bytes / (1024.0 * 1024.0));
-    printf("[GPU]   Particles (unified): %.2f MB ← ZERO-COPY OPTIMIZED\n", particle_size / (1024.0 * 1024.0));
+    printf("[GPU]   Particles (unified): %.2f MB <- ZERO-COPY OPTIMIZED\n", particle_size / (1024.0 * 1024.0));
     printf("[GPU]   Grid data (device): %.2f MB\n", 
            (grid_indices_size + grid_starts_size + grid_counts_size + grid_temp_size) / (1024.0 * 1024.0));
 }
-
 extern "C" size_t get_gpu_memory_usage() {
     return total_gpu_memory_bytes;
 }
