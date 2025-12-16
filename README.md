@@ -1,6 +1,6 @@
 # Parallel Particle Simulation
 
-A high-performance 2D particle physics simulation demonstrating five different parallelization approaches on NVIDIA Jetson embedded systems. Built in modern C++17.
+A high-performance 2D particle physics simulation demonstrating five different parallelization approaches on NVIDIA Jetson embedded systems.
 
 ## Quick Start
 
