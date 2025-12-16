@@ -1,7 +1,6 @@
 /* 
  * CUDA GPU Kernels for Parallel Particle Simulation (C++ Version)
- * Implements both simple and optimized GPU acceleration
- * FIXED: Jetson Nano compatibility issues
+ * WITH DETAILED PERFORMANCE LOGGING
  */
 
 #include "ParticleSimulation.hpp"
@@ -10,21 +9,63 @@
 #include <cstdio>
 #include <cmath>
 #include <vector>
+#include <chrono>
+
+// High-resolution timer
+inline double get_time_us() {
+    auto now = std::chrono::high_resolution_clock::now();
+    auto duration = now.time_since_epoch();
+    return std::chrono::duration<double, std::micro>(duration).count();
+}
 
 // Forward declarations
 extern "C" void cleanup_gpu_memory();
 extern "C" void init_gpu_memory(int max_particles);
 
-// CUDA error checking macro
+// CUDA error checking macro with detailed logging
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
         if (err != cudaSuccess) { \
             fprintf(stderr, "CUDA error at %s:%d: %s\n", __FILE__, __LINE__, \
                     cudaGetErrorString(err)); \
+            fprintf(stderr, "  Failed call: %s\n", #call); \
             exit(EXIT_FAILURE); \
         } \
     } while(0)
+
+// CUDA event timing helper
+class CudaTimer {
+private:
+    cudaEvent_t start, stop;
+    bool started;
+    
+public:
+    CudaTimer() : started(false) {
+        cudaEventCreate(&start);
+        cudaEventCreate(&stop);
+    }
+    
+    ~CudaTimer() {
+        cudaEventDestroy(start);
+        cudaEventDestroy(stop);
+    }
+    
+    void begin() {
+        cudaEventRecord(start);
+        started = true;
+    }
+    
+    double end() {
+        if (!started) return 0.0;
+        cudaEventRecord(stop);
+        cudaEventSynchronize(stop);
+        float ms = 0;
+        cudaEventElapsedTime(&ms, start, stop);
+        started = false;
+        return static_cast<double>(ms);
+    }
+};
 
 // Device-side constants
 __constant__ float d_friction;
@@ -43,6 +84,9 @@ static int *d_grid_counts = nullptr;
 static int gpu_max_particles = 0;
 static bool gpu_initialized = false;
 
+// GPU memory usage tracking
+static size_t total_gpu_memory_bytes = 0;
+
 // ============================================================================
 // GPU Memory Management
 // ============================================================================
@@ -60,6 +104,7 @@ extern "C" void cleanup_gpu_memory() {
     d_grid_starts = nullptr;
     d_grid_counts = nullptr;
     gpu_initialized = false;
+    total_gpu_memory_bytes = 0;
 }
 
 extern "C" void init_gpu_memory(int max_particles) {
@@ -72,22 +117,35 @@ extern "C" void init_gpu_memory(int max_particles) {
     }
     
     gpu_max_particles = max_particles;
+    total_gpu_memory_bytes = 0;
     
     // Allocate particle memory
-    CUDA_CHECK(cudaMalloc(&d_particles, max_particles * sizeof(Particle)));
+    size_t particle_size = max_particles * sizeof(Particle);
+    CUDA_CHECK(cudaMalloc(&d_particles, particle_size));
+    total_gpu_memory_bytes += particle_size;
     
     // Allocate spatial grid memory
     int grid_size = GRID_WIDTH * GRID_HEIGHT;
+    size_t grid_indices_size = max_particles * sizeof(int);
+    size_t grid_starts_size = grid_size * sizeof(int);
+    size_t grid_counts_size = grid_size * sizeof(int);
     
-    // FIXED: Use linear storage like CPU version
-    // d_grid_indices stores particle indices linearly
-    // d_grid_starts[i] = starting index in d_grid_indices for cell i
-    // d_grid_counts[i] = number of particles in cell i
-    CUDA_CHECK(cudaMalloc(&d_grid_indices, max_particles * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_grid_starts, grid_size * sizeof(int)));
-    CUDA_CHECK(cudaMalloc(&d_grid_counts, grid_size * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_grid_indices, grid_indices_size));
+    CUDA_CHECK(cudaMalloc(&d_grid_starts, grid_starts_size));
+    CUDA_CHECK(cudaMalloc(&d_grid_counts, grid_counts_size));
+    
+    total_gpu_memory_bytes += grid_indices_size + grid_starts_size + grid_counts_size;
     
     gpu_initialized = true;
+    
+    printf("[GPU] Memory initialized: %.2f MB total\n", total_gpu_memory_bytes / (1024.0 * 1024.0));
+    printf("[GPU]   Particles: %.2f MB\n", particle_size / (1024.0 * 1024.0));
+    printf("[GPU]   Grid data: %.2f MB\n", 
+           (grid_indices_size + grid_starts_size + grid_counts_size) / (1024.0 * 1024.0));
+}
+
+extern "C" size_t get_gpu_memory_usage() {
+    return total_gpu_memory_bytes;
 }
 
 // ============================================================================
@@ -249,7 +307,7 @@ __global__ void detect_collisions_simple(Particle *particles, int count, float r
 }
 
 // ============================================================================
-// Kernel: Build Spatial Grid - FIXED VERSION
+// Kernel: Build Spatial Grid
 // ============================================================================
 
 __global__ void count_particles_per_cell(Particle *particles, int count, int *grid_counts) {
@@ -281,12 +339,7 @@ __global__ void fill_particle_indices(Particle *particles, int count,
     
     if (grid_x >= 0 && grid_x < GRID_WIDTH && grid_y >= 0 && grid_y < GRID_HEIGHT) {
         int cell_idx = grid_y * GRID_WIDTH + grid_x;
-        
-        // FIXED: Use prefix sum correctly - atomicAdd returns the OLD value
-        // This is the position where THIS particle should be inserted
         int pos = atomicAdd(&grid_counts[cell_idx], 1);
-        
-        // Insert at: grid_starts[cell_idx] + position within that cell
         int insert_idx = grid_starts[cell_idx] + pos;
         grid_indices[insert_idx] = idx;
     }
@@ -338,11 +391,10 @@ __global__ void detect_collisions_complex(Particle *particles, int count,
 }
 
 // ============================================================================
-// Kernel: Optimized Update with Shared Memory - FIXED VERSION
+// Kernel: Optimized Update with Shared Memory
 // ============================================================================
 
 __global__ void update_particles_optimized(Particle *particles, int count, float dt) {
-    // Adjust shared memory size for Jetson Nano
 #ifdef JETSON_NANO
     __shared__ Particle s_particles[128];
     const int shared_size = 128;
@@ -354,7 +406,6 @@ __global__ void update_particles_optimized(Particle *particles, int count, float
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int local_idx = threadIdx.x;
     
-    // Load particle into shared memory - but handle out-of-bounds threads
     bool is_valid = false;
     if (idx < count && local_idx < shared_size) {
         s_particles[local_idx] = particles[idx];
@@ -362,9 +413,8 @@ __global__ void update_particles_optimized(Particle *particles, int count, float
     }
     __syncthreads();
     
-    // Early exit for invalid particles, but must reach all sync points
     if (!is_valid || idx >= count) {
-        __syncthreads(); // Match the final sync
+        __syncthreads();
         return;
     }
     
@@ -399,19 +449,23 @@ __global__ void update_particles_optimized(Particle *particles, int count, float
         p->vy *= scale;
     }
     
-    // Write back to global memory
     __syncthreads();
     particles[idx] = *p;
 }
 
 // ============================================================================
-// Host Functions - GPU Simple Mode
+// Host Functions - GPU Simple Mode WITH DETAILED LOGGING
 // ============================================================================
 
 extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
+    double t_start = get_time_us();
+    
     if (!gpu_initialized) {
         init_gpu_memory(sim->get_max_particles());
     }
+    
+    DetailedMetrics& metrics = sim->get_metrics_mutable();
+    bool verbose = sim->is_verbose_logging();
     
     // Get simulation parameters
     float friction = sim->get_friction();
@@ -421,8 +475,10 @@ extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
     int mouse_y = sim->get_mouse_y();
     bool mouse_pressed = sim->is_mouse_pressed();
     bool mouse_attract = sim->is_mouse_attract();
+    int count = sim->get_particle_count();
     
-    // Update device constants
+    // Timing: Constant memory copy
+    double t_const_start = get_time_us();
     CUDA_CHECK(cudaMemcpyToSymbol(d_friction, &friction, sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_restitution, &restitution, sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_force, &mouse_force, sizeof(float)));
@@ -430,14 +486,18 @@ extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_y, &mouse_y, sizeof(int)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_pressed, &mouse_pressed, sizeof(bool)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_attract, &mouse_attract, sizeof(bool)));
+    double t_const_end = get_time_us();
+    metrics.gpu_constant_copy_ms = (t_const_end - t_const_start) / 1000.0;
     
-    // Copy particles to device
-    int count = sim->get_particle_count();
+    // Timing: Host to Device transfer
+    double t_h2d_start = get_time_us();
+    size_t transfer_size = count * sizeof(Particle);
     CUDA_CHECK(cudaMemcpy(d_particles, sim->get_particle_data(),
-                         count * sizeof(Particle),
-                         cudaMemcpyHostToDevice));
+                         transfer_size, cudaMemcpyHostToDevice));
+    double t_h2d_end = get_time_us();
+    metrics.gpu_h2d_transfer_ms = (t_h2d_end - t_h2d_start) / 1000.0;
     
-    // Launch kernels - adjust thread count for Jetson Nano
+    // Launch parameters
 #ifdef JETSON_NANO
     int threads = 128;
 #else
@@ -445,28 +505,74 @@ extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
 #endif
     int blocks = (count + threads - 1) / threads;
     
+    // Timing: Update kernel
+    CudaTimer timer_update;
+    timer_update.begin();
     update_particles_simple<<<blocks, threads>>>(d_particles, count, dt);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_update_kernel_ms = timer_update.end();
     
+    // Timing: Collision kernel
+    CudaTimer timer_collision;
+    timer_collision.begin();
     detect_collisions_simple<<<blocks, threads>>>(d_particles, count, restitution);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_collision_kernel_ms = timer_collision.end();
     
-    // Copy particles back to host
+    // Timing: Device to Host transfer
+    double t_d2h_start = get_time_us();
     CUDA_CHECK(cudaMemcpy(sim->get_particle_data(), d_particles,
-                         count * sizeof(Particle),
-                         cudaMemcpyDeviceToHost));
+                         transfer_size, cudaMemcpyDeviceToHost));
+    double t_d2h_end = get_time_us();
+    metrics.gpu_d2h_transfer_ms = (t_d2h_end - t_d2h_start) / 1000.0;
     
+    // Timing: Final sync
+    double t_sync_start = get_time_us();
     CUDA_CHECK(cudaDeviceSynchronize());
+    double t_sync_end = get_time_us();
+    metrics.gpu_sync_overhead_ms = (t_sync_end - t_sync_start) / 1000.0;
+    
+    double t_end = get_time_us();
+    double total_time_ms = (t_end - t_start) / 1000.0;
+    
+    metrics.particle_data_size_bytes = transfer_size;
+    metrics.gpu_memory_used_bytes = total_gpu_memory_bytes;
+    
+    if (verbose) {
+        printf("\n[GPU SIMPLE - Frame %d]\n", sim->get_frame_counter());
+        printf("  Particles: %d (%zu bytes)\n", count, transfer_size);
+        printf("  Constant copy:  %6.3f ms\n", metrics.gpu_constant_copy_ms);
+        printf("  H2D transfer:   %6.3f ms (%.1f MB/s)\n", 
+               metrics.gpu_h2d_transfer_ms,
+               (transfer_size / 1024.0 / 1024.0) / (metrics.gpu_h2d_transfer_ms / 1000.0));
+        printf("  Update kernel:  %6.3f ms\n", metrics.gpu_update_kernel_ms);
+        printf("  Collision kern: %6.3f ms (O(n²) = %d checks)\n", 
+               metrics.gpu_collision_kernel_ms, (count * (count-1)) / 2);
+        printf("  D2H transfer:   %6.3f ms (%.1f MB/s)\n", 
+               metrics.gpu_d2h_transfer_ms,
+               (transfer_size / 1024.0 / 1024.0) / (metrics.gpu_d2h_transfer_ms / 1000.0));
+        printf("  Sync overhead:  %6.3f ms\n", metrics.gpu_sync_overhead_ms);
+        printf("  TOTAL:          %6.3f ms\n", total_time_ms);
+        printf("  Breakdown: Compute=%.1f%% Transfer=%.1f%% Overhead=%.1f%%\n",
+               100.0 * (metrics.gpu_update_kernel_ms + metrics.gpu_collision_kernel_ms) / total_time_ms,
+               100.0 * (metrics.gpu_h2d_transfer_ms + metrics.gpu_d2h_transfer_ms) / total_time_ms,
+               100.0 * (metrics.gpu_constant_copy_ms + metrics.gpu_sync_overhead_ms) / total_time_ms);
+    }
 }
 
 // ============================================================================
-// Host Functions - GPU Complex Mode - FIXED VERSION
+// Host Functions - GPU Complex Mode WITH DETAILED LOGGING
 // ============================================================================
 
 extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
+    double t_start = get_time_us();
+    
     if (!gpu_initialized) {
         init_gpu_memory(sim->get_max_particles());
     }
+    
+    DetailedMetrics& metrics = sim->get_metrics_mutable();
+    bool verbose = sim->is_verbose_logging();
     
     // Get simulation parameters
     float friction = sim->get_friction();
@@ -476,8 +582,10 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     int mouse_y = sim->get_mouse_y();
     bool mouse_pressed = sim->is_mouse_pressed();
     bool mouse_attract = sim->is_mouse_attract();
+    int count = sim->get_particle_count();
     
-    // Update device constants
+    // Timing: Constant memory copy
+    double t_const_start = get_time_us();
     CUDA_CHECK(cudaMemcpyToSymbol(d_friction, &friction, sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_restitution, &restitution, sizeof(float)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_force, &mouse_force, sizeof(float)));
@@ -485,14 +593,17 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_y, &mouse_y, sizeof(int)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_pressed, &mouse_pressed, sizeof(bool)));
     CUDA_CHECK(cudaMemcpyToSymbol(d_mouse_attract, &mouse_attract, sizeof(bool)));
+    double t_const_end = get_time_us();
+    metrics.gpu_constant_copy_ms = (t_const_end - t_const_start) / 1000.0;
     
-    // Copy particles to device
-    int count = sim->get_particle_count();
+    // Timing: Host to Device transfer
+    double t_h2d_start = get_time_us();
+    size_t transfer_size = count * sizeof(Particle);
     CUDA_CHECK(cudaMemcpy(d_particles, sim->get_particle_data(),
-                         count * sizeof(Particle),
-                         cudaMemcpyHostToDevice));
+                         transfer_size, cudaMemcpyHostToDevice));
+    double t_h2d_end = get_time_us();
+    metrics.gpu_h2d_transfer_ms = (t_h2d_end - t_h2d_start) / 1000.0;
     
-    // Adjust thread count for Jetson Nano
 #ifdef JETSON_NANO
     int threads = 128;
 #else
@@ -500,21 +611,26 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
 #endif
     int blocks = (count + threads - 1) / threads;
     
-    // Update particles with optimized kernel
+    // Timing: Update kernel (optimized with shared memory)
+    CudaTimer timer_update;
+    timer_update.begin();
     update_particles_optimized<<<blocks, threads>>>(d_particles, count, dt);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_update_kernel_ms = timer_update.end();
     
-    // Build spatial grid - FIXED APPROACH
+    // Build spatial grid
     int grid_size = GRID_WIDTH * GRID_HEIGHT;
     
-    // Step 1: Clear grid counts
+    // Step 1: Clear and count
+    CudaTimer timer_grid_count;
+    timer_grid_count.begin();
     CUDA_CHECK(cudaMemset(d_grid_counts, 0, grid_size * sizeof(int)));
-    
-    // Step 2: Count particles per cell
     count_particles_per_cell<<<blocks, threads>>>(d_particles, count, d_grid_counts);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_grid_count_kernel_ms = timer_grid_count.end();
     
-    // Step 3: Compute prefix sum on CPU (simpler and works for Jetson Nano)
+    // Step 2: Prefix sum on CPU
+    double t_prefix_start = get_time_us();
     std::vector<int> h_grid_counts(grid_size);
     std::vector<int> h_grid_starts(grid_size);
     
@@ -528,24 +644,73 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     
     CUDA_CHECK(cudaMemcpy(d_grid_starts, h_grid_starts.data(),
                          grid_size * sizeof(int), cudaMemcpyHostToDevice));
+    double t_prefix_end = get_time_us();
+    metrics.gpu_prefix_sum_ms = (t_prefix_end - t_prefix_start) / 1000.0;
     
-    // Step 4: Reset counts and fill particle indices
+    // Step 3: Fill indices
+    CudaTimer timer_grid_fill;
+    timer_grid_fill.begin();
     CUDA_CHECK(cudaMemset(d_grid_counts, 0, grid_size * sizeof(int)));
-    
     fill_particle_indices<<<blocks, threads>>>(d_particles, count,
                                                d_grid_indices, d_grid_starts, d_grid_counts);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_grid_fill_kernel_ms = timer_grid_fill.end();
     
-    // Step 5: Collision detection with spatial grid
+    // Step 4: Collision detection with spatial grid
+    CudaTimer timer_collision;
+    timer_collision.begin();
     detect_collisions_complex<<<blocks, threads>>>(d_particles, count,
                                                    d_grid_indices, d_grid_starts,
                                                    d_grid_counts, restitution);
     CUDA_CHECK(cudaGetLastError());
+    metrics.gpu_collision_kernel_ms = timer_collision.end();
     
-    // Copy particles back to host
+    // Timing: Device to Host transfer
+    double t_d2h_start = get_time_us();
     CUDA_CHECK(cudaMemcpy(sim->get_particle_data(), d_particles,
-                         count * sizeof(Particle),
-                         cudaMemcpyDeviceToHost));
+                         transfer_size, cudaMemcpyDeviceToHost));
+    double t_d2h_end = get_time_us();
+    metrics.gpu_d2h_transfer_ms = (t_d2h_end - t_d2h_start) / 1000.0;
     
+    // Timing: Final sync
+    double t_sync_start = get_time_us();
     CUDA_CHECK(cudaDeviceSynchronize());
+    double t_sync_end = get_time_us();
+    metrics.gpu_sync_overhead_ms = (t_sync_end - t_sync_start) / 1000.0;
+    
+    double t_end = get_time_us();
+    double total_time_ms = (t_end - t_start) / 1000.0;
+    
+    metrics.particle_data_size_bytes = transfer_size;
+    metrics.gpu_memory_used_bytes = total_gpu_memory_bytes;
+    
+    if (verbose) {
+        printf("\n[GPU COMPLEX - Frame %d]\n", sim->get_frame_counter());
+        printf("  Particles: %d (%zu bytes)\n", count, transfer_size);
+        printf("  Constant copy:    %6.3f ms\n", metrics.gpu_constant_copy_ms);
+        printf("  H2D transfer:     %6.3f ms (%.1f MB/s)\n", 
+               metrics.gpu_h2d_transfer_ms,
+               (transfer_size / 1024.0 / 1024.0) / (metrics.gpu_h2d_transfer_ms / 1000.0));
+        printf("  Update kernel:    %6.3f ms (shared mem)\n", metrics.gpu_update_kernel_ms);
+        printf("  Grid count kern:  %6.3f ms\n", metrics.gpu_grid_count_kernel_ms);
+        printf("  Prefix sum (CPU): %6.3f ms\n", metrics.gpu_prefix_sum_ms);
+        printf("  Grid fill kern:   %6.3f ms\n", metrics.gpu_grid_fill_kernel_ms);
+        printf("  Collision kern:   %6.3f ms (O(n) spatial grid)\n", metrics.gpu_collision_kernel_ms);
+        printf("  D2H transfer:     %6.3f ms (%.1f MB/s)\n", 
+               metrics.gpu_d2h_transfer_ms,
+               (transfer_size / 1024.0 / 1024.0) / (metrics.gpu_d2h_transfer_ms / 1000.0));
+        printf("  Sync overhead:    %6.3f ms\n", metrics.gpu_sync_overhead_ms);
+        printf("  TOTAL:            %6.3f ms\n", total_time_ms);
+        
+        double compute_time = metrics.gpu_update_kernel_ms + metrics.gpu_grid_count_kernel_ms + 
+                             metrics.gpu_grid_fill_kernel_ms + metrics.gpu_collision_kernel_ms;
+        double transfer_time = metrics.gpu_h2d_transfer_ms + metrics.gpu_d2h_transfer_ms;
+        double overhead_time = metrics.gpu_constant_copy_ms + metrics.gpu_prefix_sum_ms + 
+                              metrics.gpu_sync_overhead_ms;
+        
+        printf("  Breakdown: Compute=%.1f%% Transfer=%.1f%% Overhead=%.1f%%\n",
+               100.0 * compute_time / total_time_ms,
+               100.0 * transfer_time / total_time_ms,
+               100.0 * overhead_time / total_time_ms);
+    }
 }
