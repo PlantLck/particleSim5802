@@ -1,6 +1,7 @@
 /* 
  * CUDA GPU Kernels for Parallel Particle Simulation (C++ Version)
  * Implements both simple and optimized GPU acceleration
+ * FIXED: Jetson Nano compatibility issues
  */
 
 #include "ParticleSimulation.hpp"
@@ -8,6 +9,7 @@
 #include <device_launch_parameters.h>
 #include <cstdio>
 #include <cmath>
+#include <vector>
 
 // Forward declarations
 extern "C" void cleanup_gpu_memory();
@@ -76,6 +78,11 @@ extern "C" void init_gpu_memory(int max_particles) {
     
     // Allocate spatial grid memory
     int grid_size = GRID_WIDTH * GRID_HEIGHT;
+    
+    // FIXED: Use linear storage like CPU version
+    // d_grid_indices stores particle indices linearly
+    // d_grid_starts[i] = starting index in d_grid_indices for cell i
+    // d_grid_counts[i] = number of particles in cell i
     CUDA_CHECK(cudaMalloc(&d_grid_indices, max_particles * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_grid_starts, grid_size * sizeof(int)));
     CUDA_CHECK(cudaMalloc(&d_grid_counts, grid_size * sizeof(int)));
@@ -242,11 +249,10 @@ __global__ void detect_collisions_simple(Particle *particles, int count, float r
 }
 
 // ============================================================================
-// Kernel: Build Spatial Grid
+// Kernel: Build Spatial Grid - FIXED VERSION
 // ============================================================================
 
-__global__ void build_spatial_grid(Particle *particles, int count,
-                                   int *grid_indices, int *grid_counts) {
+__global__ void count_particles_per_cell(Particle *particles, int count, int *grid_counts) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= count) return;
     
@@ -258,8 +264,31 @@ __global__ void build_spatial_grid(Particle *particles, int count,
     
     if (grid_x >= 0 && grid_x < GRID_WIDTH && grid_y >= 0 && grid_y < GRID_HEIGHT) {
         int cell_idx = grid_y * GRID_WIDTH + grid_x;
+        atomicAdd(&grid_counts[cell_idx], 1);
+    }
+}
+
+__global__ void fill_particle_indices(Particle *particles, int count,
+                                      int *grid_indices, int *grid_starts, int *grid_counts) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= count) return;
+    
+    Particle *p = &particles[idx];
+    if (!p->active) return;
+    
+    int grid_x = static_cast<int>(p->x / GRID_CELL_SIZE);
+    int grid_y = static_cast<int>(p->y / GRID_CELL_SIZE);
+    
+    if (grid_x >= 0 && grid_x < GRID_WIDTH && grid_y >= 0 && grid_y < GRID_HEIGHT) {
+        int cell_idx = grid_y * GRID_WIDTH + grid_x;
+        
+        // FIXED: Use prefix sum correctly - atomicAdd returns the OLD value
+        // This is the position where THIS particle should be inserted
         int pos = atomicAdd(&grid_counts[cell_idx], 1);
-        grid_indices[cell_idx * count + pos] = idx;
+        
+        // Insert at: grid_starts[cell_idx] + position within that cell
+        int insert_idx = grid_starts[cell_idx] + pos;
+        grid_indices[insert_idx] = idx;
     }
 }
 
@@ -309,25 +338,37 @@ __global__ void detect_collisions_complex(Particle *particles, int count,
 }
 
 // ============================================================================
-// Kernel: Optimized Update with Shared Memory
+// Kernel: Optimized Update with Shared Memory - FIXED VERSION
 // ============================================================================
 
 __global__ void update_particles_optimized(Particle *particles, int count, float dt) {
+    // Adjust shared memory size for Jetson Nano
+#ifdef JETSON_NANO
+    __shared__ Particle s_particles[128];
+    const int shared_size = 128;
+#else
     __shared__ Particle s_particles[256];
+    const int shared_size = 256;
+#endif
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int local_idx = threadIdx.x;
     
-    // Load particle into shared memory
-    if (idx < count && local_idx < 256) {
+    // Load particle into shared memory - but handle out-of-bounds threads
+    bool is_valid = false;
+    if (idx < count && local_idx < shared_size) {
         s_particles[local_idx] = particles[idx];
+        is_valid = s_particles[local_idx].active;
     }
     __syncthreads();
     
-    if (idx >= count) return;
+    // Early exit for invalid particles, but must reach all sync points
+    if (!is_valid || idx >= count) {
+        __syncthreads(); // Match the final sync
+        return;
+    }
     
     Particle *p = &s_particles[local_idx];
-    if (!p->active) return;
     
     // Apply friction
     if (d_friction > 0.0f) {
@@ -396,8 +437,12 @@ extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
                          count * sizeof(Particle),
                          cudaMemcpyHostToDevice));
     
-    // Launch kernels
+    // Launch kernels - adjust thread count for Jetson Nano
+#ifdef JETSON_NANO
+    int threads = 128;
+#else
     int threads = 256;
+#endif
     int blocks = (count + threads - 1) / threads;
     
     update_particles_simple<<<blocks, threads>>>(d_particles, count, dt);
@@ -415,7 +460,7 @@ extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
 }
 
 // ============================================================================
-// Host Functions - GPU Complex Mode
+// Host Functions - GPU Complex Mode - FIXED VERSION
 // ============================================================================
 
 extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
@@ -447,22 +492,29 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
                          count * sizeof(Particle),
                          cudaMemcpyHostToDevice));
     
+    // Adjust thread count for Jetson Nano
+#ifdef JETSON_NANO
+    int threads = 128;
+#else
     int threads = 256;
+#endif
     int blocks = (count + threads - 1) / threads;
     
     // Update particles with optimized kernel
     update_particles_optimized<<<blocks, threads>>>(d_particles, count, dt);
     CUDA_CHECK(cudaGetLastError());
     
-    // Build spatial grid
+    // Build spatial grid - FIXED APPROACH
     int grid_size = GRID_WIDTH * GRID_HEIGHT;
+    
+    // Step 1: Clear grid counts
     CUDA_CHECK(cudaMemset(d_grid_counts, 0, grid_size * sizeof(int)));
     
-    build_spatial_grid<<<blocks, threads>>>(d_particles, count,
-                                           d_grid_indices, d_grid_counts);
+    // Step 2: Count particles per cell
+    count_particles_per_cell<<<blocks, threads>>>(d_particles, count, d_grid_counts);
     CUDA_CHECK(cudaGetLastError());
     
-    // Compute prefix sum for grid starts (on CPU for simplicity)
+    // Step 3: Compute prefix sum on CPU (simpler and works for Jetson Nano)
     std::vector<int> h_grid_counts(grid_size);
     std::vector<int> h_grid_starts(grid_size);
     
@@ -477,7 +529,14 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     CUDA_CHECK(cudaMemcpy(d_grid_starts, h_grid_starts.data(),
                          grid_size * sizeof(int), cudaMemcpyHostToDevice));
     
-    // Collision detection with spatial grid
+    // Step 4: Reset counts and fill particle indices
+    CUDA_CHECK(cudaMemset(d_grid_counts, 0, grid_size * sizeof(int)));
+    
+    fill_particle_indices<<<blocks, threads>>>(d_particles, count,
+                                               d_grid_indices, d_grid_starts, d_grid_counts);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Step 5: Collision detection with spatial grid
     detect_collisions_complex<<<blocks, threads>>>(d_particles, count,
                                                    d_grid_indices, d_grid_starts,
                                                    d_grid_counts, restitution);
