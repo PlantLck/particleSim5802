@@ -157,11 +157,8 @@ extern "C" void init_gpu_memory(int max_particles) {
     size_t particle_size = max_particles * sizeof(Particle);
     CUDA_CHECK(cudaMallocManaged(&d_particles, particle_size));
     
-    // Prefetch to GPU for better initial performance
-    int device;
-    cudaGetDevice(&device);
-    CUDA_CHECK(cudaMemPrefetchAsync(d_particles, particle_size, device, 0));
-    
+    // NOTE: cudaMemPrefetchAsync removed - causes device ordinal errors during initialization
+    // Unified memory will automatically migrate data on first GPU access
     total_gpu_memory_bytes += particle_size;
     
     // Allocate spatial grid memory (keep as device memory for performance)
