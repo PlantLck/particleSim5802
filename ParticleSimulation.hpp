@@ -71,6 +71,57 @@ struct Particle {
 };
 
 // ============================================================================
+// Detailed Performance Metrics
+// ============================================================================
+
+struct DetailedMetrics {
+    // Overall timing
+    double total_physics_time_ms;
+    double total_render_time_ms;
+    double fps;
+    
+    // CPU breakdown
+    double cpu_update_time_ms;
+    double cpu_grid_build_time_ms;
+    double cpu_collision_time_ms;
+    
+    // GPU breakdown (Mode 4 & 5)
+    double gpu_h2d_transfer_ms;      // Host to Device
+    double gpu_d2h_transfer_ms;      // Device to Host
+    double gpu_update_kernel_ms;
+    double gpu_collision_kernel_ms;
+    double gpu_grid_count_kernel_ms;
+    double gpu_grid_fill_kernel_ms;
+    double gpu_prefix_sum_ms;
+    double gpu_constant_copy_ms;
+    double gpu_sync_overhead_ms;
+    
+    // Memory info
+    size_t gpu_memory_used_bytes;
+    size_t particle_data_size_bytes;
+    
+    // System metrics
+    float temperature_c;
+    float power_watts;
+    
+    // Frame statistics
+    int particle_count;
+    int collision_checks;
+    int actual_collisions;
+    
+    DetailedMetrics() : 
+        total_physics_time_ms(0), total_render_time_ms(0), fps(0),
+        cpu_update_time_ms(0), cpu_grid_build_time_ms(0), cpu_collision_time_ms(0),
+        gpu_h2d_transfer_ms(0), gpu_d2h_transfer_ms(0), 
+        gpu_update_kernel_ms(0), gpu_collision_kernel_ms(0),
+        gpu_grid_count_kernel_ms(0), gpu_grid_fill_kernel_ms(0),
+        gpu_prefix_sum_ms(0), gpu_constant_copy_ms(0), gpu_sync_overhead_ms(0),
+        gpu_memory_used_bytes(0), particle_data_size_bytes(0),
+        temperature_c(0), power_watts(0),
+        particle_count(0), collision_checks(0), actual_collisions(0) {}
+};
+
+// ============================================================================
 // Spatial Grid for Collision Optimization
 // ============================================================================
 
@@ -99,21 +150,6 @@ public:
 };
 
 // ============================================================================
-// Performance Metrics
-// ============================================================================
-
-struct PerformanceMetrics {
-    double physics_time_ms;
-    double render_time_ms;
-    double fps;
-    float temperature_c;
-    float power_watts;
-    
-    PerformanceMetrics() : physics_time_ms(0), render_time_ms(0), fps(0),
-                          temperature_c(0), power_watts(0) {}
-};
-
-// ============================================================================
 // Main Simulation Class
 // ============================================================================
 
@@ -139,7 +175,11 @@ private:
     ParallelMode mode;
     
     // Performance metrics
-    PerformanceMetrics metrics;
+    DetailedMetrics metrics;
+    
+    // Logging control
+    bool verbose_logging;
+    int frame_counter;
     
 public:
     Simulation(int particle_count = DEFAULT_PARTICLE_COUNT);
@@ -161,6 +201,7 @@ public:
     void set_mouse_state(int x, int y, bool pressed, bool attract);
     void adjust_friction(float delta);
     void request_reset() { reset_requested = true; }
+    void set_verbose_logging(bool enabled) { verbose_logging = enabled; }
     
     // Getters
     const std::vector<Particle>& get_particles() const { return particles; }
@@ -177,15 +218,19 @@ public:
     int get_mouse_y() const { return mouse_y; }
     bool is_mouse_pressed() const { return mouse_pressed; }
     bool is_mouse_attract() const { return mouse_attract; }
-    const PerformanceMetrics& get_metrics() const { return metrics; }
+    const DetailedMetrics& get_metrics() const { return metrics; }
+    DetailedMetrics& get_metrics_mutable() { return metrics; }
     SpatialGrid& get_grid() { return *grid; }
+    bool is_verbose_logging() const { return verbose_logging; }
     
     // Physics time tracking
-    void set_physics_time(double time_ms) { metrics.physics_time_ms = time_ms; }
-    void set_render_time(double time_ms) { metrics.render_time_ms = time_ms; }
+    void set_physics_time(double time_ms) { metrics.total_physics_time_ms = time_ms; }
+    void set_render_time(double time_ms) { metrics.total_render_time_ms = time_ms; }
     void set_fps(double fps_value) { metrics.fps = fps_value; }
     void set_temperature(float temp) { metrics.temperature_c = temp; }
     void set_power(float power) { metrics.power_watts = power; }
+    void increment_frame_counter() { frame_counter++; }
+    int get_frame_counter() const { return frame_counter; }
 };
 
 // ============================================================================
@@ -217,6 +262,7 @@ public:
     static void update_metrics(Simulation& sim);
     static float read_temperature();
     static float read_power();
+    static void log_detailed_metrics(const Simulation& sim);
 };
 
 // ============================================================================
@@ -226,7 +272,9 @@ public:
 class Utils {
 public:
     static double get_time_ms();
+    static double get_time_us(); // Microsecond precision
     static std::string get_mode_name(ParallelMode mode);
+    static void print_performance_summary(const DetailedMetrics& metrics, ParallelMode mode);
 };
 
 // ============================================================================
@@ -239,6 +287,7 @@ extern "C" {
     void cleanup_gpu_memory();
     void update_physics_gpu_simple_cuda(Simulation* sim, float dt);
     void update_physics_gpu_complex_cuda(Simulation* sim, float dt);
+    size_t get_gpu_memory_usage();
 }
 #endif
 
