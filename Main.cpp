@@ -89,6 +89,17 @@ public:
             case SDLK_s:
                 toggle_stats();
                 break;
+                
+            case SDLK_l:
+                sim.set_verbose_logging(!sim.is_verbose_logging());
+                if (sim.is_verbose_logging()) {
+                    std::cout << "\n*** VERBOSE LOGGING ENABLED ***\n";
+                    std::cout << "Detailed performance metrics will be printed to console\n";
+                    std::cout << "Press L again to disable\n\n";
+                } else {
+                    std::cout << "\n*** VERBOSE LOGGING DISABLED ***\n\n";
+                }
+                break;
         }
     }
     
@@ -143,13 +154,21 @@ public:
 #elif defined(PLATFORM_JETSON)
         std::cout << "NVIDIA Jetson\n";
         std::cout << "Max Particles: " << MAX_PARTICLES << "\n";
+        
+        // Read Jetson model info
+        system("cat /etc/nv_tegra_release 2>/dev/null | head -1");
 #else
         std::cout << "Linux Desktop\n";
         std::cout << "Max Particles: " << MAX_PARTICLES << "\n";
 #endif
         std::cout << "Initial particles: " << sim.get_particle_count() << "\n";
-        std::cout << "Press M to toggle menu\n";
-        std::cout << "Press ESC to exit\n\n";
+        std::cout << "\nControls:\n";
+        std::cout << "  [1-5]  Switch parallelization modes\n";
+        std::cout << "  [L]    Toggle verbose logging\n";
+        std::cout << "  [M]    Toggle menu\n";
+        std::cout << "  [ESC]  Exit\n\n";
+        
+        std::cout << "Press 'L' to enable detailed performance logging!\n\n";
     }
     
     int run() {
@@ -195,6 +214,10 @@ public:
             // Update system metrics periodically
             SystemMonitor::update_metrics(sim);
         }
+        
+        // Print final summary
+        std::cout << "\n\n=== Final Performance Summary ===\n";
+        Utils::print_performance_summary(sim.get_metrics(), sim.get_mode());
         
         std::cout << "\nSimulation terminated successfully\n";
         return 0;
@@ -249,9 +272,6 @@ int main(int argc, char* argv[]) {
                 if (dt > 0.05f) dt = 0.05f;
                 
                 PhysicsEngine::update_mpi(sim, dt);
-                
-                // Check if rank 0 wants to terminate (simplified)
-                // In production, would use proper MPI termination signal
             }
         }
         
