@@ -111,7 +111,9 @@ Simulation::Simulation(int particle_count)
       mouse_attract(true),
       running(true),
       reset_requested(false),
-      mode(ParallelMode::SEQUENTIAL) {
+      mode(ParallelMode::SEQUENTIAL),
+      verbose_logging(false),
+      frame_counter(0) {
     
     particles.reserve(MAX_PARTICLES);
     
@@ -134,9 +136,7 @@ void Simulation::update(float dt) {
     }
     
     if (running) {
-        // CRITICAL FIX: Grid update moved INSIDE each physics mode
-        // Each mode now updates grid AFTER position updates and BEFORE collision detection
-        // This ensures collision detection uses current positions, not stale data
+        frame_counter++;
         
         // Call appropriate physics update based on mode
         switch (mode) {
@@ -164,6 +164,7 @@ void Simulation::reset() {
     particles.clear();
     spawn_random_particles(current_count);
     reset_requested = false;
+    frame_counter = 0;
 }
 
 void Simulation::spawn_particle(float x, float y, float vx, float vy) {
@@ -235,6 +236,12 @@ double Utils::get_time_ms() {
     return std::chrono::duration<double, std::milli>(duration).count();
 }
 
+double Utils::get_time_us() {
+    auto now = std::chrono::high_resolution_clock::now();
+    auto duration = now.time_since_epoch();
+    return std::chrono::duration<double, std::micro>(duration).count();
+}
+
 std::string Utils::get_mode_name(ParallelMode mode) {
     switch (mode) {
         case ParallelMode::SEQUENTIAL:    return "Sequential";
@@ -244,4 +251,27 @@ std::string Utils::get_mode_name(ParallelMode mode) {
         case ParallelMode::GPU_COMPLEX:   return "GPU Complex";
         default:                          return "Unknown";
     }
+}
+
+void Utils::print_performance_summary(const DetailedMetrics& metrics, ParallelMode mode) {
+    printf("\n=== Performance Summary ===\n");
+    printf("Mode: %s\n", get_mode_name(mode).c_str());
+    printf("FPS: %.1f\n", metrics.fps);
+    printf("Total Physics: %.2f ms\n", metrics.total_physics_time_ms);
+    printf("Total Render: %.2f ms\n", metrics.total_render_time_ms);
+    
+    if (mode == ParallelMode::GPU_SIMPLE || mode == ParallelMode::GPU_COMPLEX) {
+        printf("\nGPU Breakdown:\n");
+        printf("  H2D Transfer: %.3f ms\n", metrics.gpu_h2d_transfer_ms);
+        printf("  D2H Transfer: %.3f ms\n", metrics.gpu_d2h_transfer_ms);
+        printf("  Update Kernel: %.3f ms\n", metrics.gpu_update_kernel_ms);
+        printf("  Collision Kernel: %.3f ms\n", metrics.gpu_collision_kernel_ms);
+        
+        if (mode == ParallelMode::GPU_COMPLEX) {
+            printf("  Grid Count: %.3f ms\n", metrics.gpu_grid_count_kernel_ms);
+            printf("  Grid Fill: %.3f ms\n", metrics.gpu_grid_fill_kernel_ms);
+            printf("  Prefix Sum: %.3f ms\n", metrics.gpu_prefix_sum_ms);
+        }
+    }
+    printf("\n");
 }
