@@ -45,20 +45,23 @@ ifeq ($(PLATFORM),jetson)
     ifeq ($(JETSON_MODEL),32)
         # Jetson Nano, TX1, TX2 (Maxwell/Pascal)
         CUDA_ARCH := -arch=sm_53
-        CXXFLAGS += -DJETSON_NANO
+        CXXFLAGS += -DJETSON_NANO -DPLATFORM_JETSON
         $(info Detected: Jetson Nano/TX series - Using sm_53)
     else ifeq ($(JETSON_MODEL),35)
         # Jetson Orin
         CUDA_ARCH := -arch=sm_87
+        CXXFLAGS += -DPLATFORM_JETSON
         $(info Detected: Jetson Orin series - Using sm_87)
     else
         # Default to Xavier (most common modern Jetson)
         CUDA_ARCH := -arch=sm_72
+        CXXFLAGS += -DPLATFORM_JETSON
         $(info Detected: Jetson Xavier series - Using sm_72)
     endif
 else
     # Desktop GPU - use common architecture
     CUDA_ARCH := -arch=sm_86
+    CXXFLAGS += -DPLATFORM_LINUX
     $(info Using desktop GPU architecture: sm_86 (adjust if needed))
 endif
 
