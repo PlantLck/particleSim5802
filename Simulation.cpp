@@ -274,13 +274,8 @@ int Utils::random_int(int min, int max) {
 }
 
 void Utils::print_performance_summary(const PerformanceMetrics& metrics, ParallelMode mode) {
-    const char* mode_names[] = {
-        "Sequential", "Multithreaded (OpenMP)", "MPI", 
-        "GPU Simple", "GPU Complex"
-    };
-    
     printf("\n=== Performance Summary ===\n");
-    printf("Mode: %s\n", mode_names[static_cast<int>(mode)]);
+    printf("Mode: %s\n", get_mode_name(mode));
     printf("FPS: %.2f\n", metrics.fps);
     printf("Physics Time: %.2f ms\n", metrics.physics_time_ms);
     printf("Render Time: %.2f ms\n", metrics.render_time_ms);
@@ -293,6 +288,17 @@ void Utils::print_performance_summary(const PerformanceMetrics& metrics, Paralle
         printf("Power: %.1f W\n", metrics.power_watts);
     }
     printf("==========================\n\n");
+}
+
+const char* Utils::get_mode_name(ParallelMode mode) {
+    static const char* mode_names[] = {
+        "Sequential",
+        "Multithreaded (OpenMP)",
+        "MPI",
+        "GPU Simple",
+        "GPU Complex"
+    };
+    return mode_names[static_cast<int>(mode)];
 }
 
 // ============================================================================
