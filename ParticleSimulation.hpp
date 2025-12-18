@@ -52,6 +52,7 @@ constexpr int GRID_CELL_SIZE = 30;
 constexpr int GRID_WIDTH = WINDOW_WIDTH / GRID_CELL_SIZE;
 constexpr int GRID_HEIGHT = WINDOW_HEIGHT / GRID_CELL_SIZE;
 constexpr int MAX_PARTICLES = 20000;
+constexpr int DEFAULT_PARTICLE_COUNT = 800;
 
 // ============================================================================
 // OPTIMIZED PARTICLE STRUCTURE
@@ -143,8 +144,8 @@ class SpatialGrid {
 private:
     int grid_width;
     int grid_height;
-    int num_cells;
     float cell_size;
+    int num_cells;
     
     std::vector<int> particle_indices;  // Particle IDs sorted by cell
     std::vector<int> cell_starts;       // Start index for each cell
@@ -298,7 +299,7 @@ public:
     /**
      * Constructor: Initialize simulation with default parameters
      */
-    Simulation(int particle_count, int max_count);
+    Simulation(int particle_count, int max_count = MAX_PARTICLES);
     
     /**
      * Destructor: Cleanup (CUDA memory freed here)
@@ -344,6 +345,11 @@ public:
     // Physics parameters
     inline float get_friction() const { return friction; }
     inline void set_friction(float f) { friction = f; }
+    inline void adjust_friction(float delta) { 
+        friction += delta;
+        if (friction < 0.0f) friction = 0.0f;
+        if (friction > 1.0f) friction = 1.0f;
+    }
     inline float get_restitution() const { return restitution; }
     inline void set_restitution(float r) { restitution = r; }
     inline float get_mouse_force() const { return mouse_force; }
@@ -379,7 +385,9 @@ public:
     
     // Logging
     inline bool is_verbose() const { return verbose_logging; }
+    inline bool is_verbose_logging() const { return verbose_logging; }
     inline void set_verbose(bool v) { verbose_logging = v; }
+    inline void set_verbose_logging(bool v) { verbose_logging = v; }
     
     // Frame counter
     inline int get_frame_counter() const { return frame_counter; }
@@ -447,6 +455,33 @@ public:
      */
     static float random_float(float min, float max);
     static int random_int(int min, int max);
+    
+    /**
+     * Performance summary printing
+     */
+    static void print_performance_summary(const PerformanceMetrics& metrics, ParallelMode mode);
+};
+
+// ============================================================================
+// SYSTEM MONITORING
+// ============================================================================
+
+class SystemMonitor {
+public:
+    /**
+     * Update system metrics (temperature, power)
+     */
+    static void update_metrics(Simulation& sim);
+    
+    /**
+     * Platform-specific temperature reading
+     */
+    static float read_temperature();
+    
+    /**
+     * Platform-specific power reading
+     */
+    static float read_power();
 };
 
 // ============================================================================
