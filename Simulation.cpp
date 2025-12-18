@@ -272,3 +272,113 @@ float Utils::random_float(float min, float max) {
 int Utils::random_int(int min, int max) {
     return min + std::rand() % (max - min + 1);
 }
+
+void Utils::print_performance_summary(const PerformanceMetrics& metrics, ParallelMode mode) {
+    const char* mode_names[] = {
+        "Sequential", "Multithreaded (OpenMP)", "MPI", 
+        "GPU Simple", "GPU Complex"
+    };
+    
+    printf("\n=== Performance Summary ===\n");
+    printf("Mode: %s\n", mode_names[static_cast<int>(mode)]);
+    printf("FPS: %.2f\n", metrics.fps);
+    printf("Physics Time: %.2f ms\n", metrics.physics_time_ms);
+    printf("Render Time: %.2f ms\n", metrics.render_time_ms);
+    printf("Frame Time: %.2f ms\n", metrics.frame_time_ms);
+    
+    if (metrics.temperature_c > 0.0f) {
+        printf("Temperature: %.1f°C\n", metrics.temperature_c);
+    }
+    if (metrics.power_watts > 0.0f) {
+        printf("Power: %.1f W\n", metrics.power_watts);
+    }
+    printf("==========================\n\n");
+}
+
+// ============================================================================
+// SYSTEM MONITOR IMPLEMENTATION
+// ============================================================================
+
+#include <fstream>
+#include <sstream>
+
+void SystemMonitor::update_metrics(Simulation& sim) {
+    sim.set_temperature(read_temperature());
+    sim.set_power(read_power());
+}
+
+#ifdef PLATFORM_JETSON
+
+float SystemMonitor::read_temperature() {
+    float max_temp = 0.0f;
+    
+    // Try multiple thermal zones
+    for (int zone = 0; zone < 10; zone++) {
+        std::string path = "/sys/devices/virtual/thermal/thermal_zone" + 
+                          std::to_string(zone) + "/temp";
+        std::ifstream file(path);
+        
+        if (file.is_open()) {
+            int temp_millidegrees;
+            file >> temp_millidegrees;
+            float temp_celsius = temp_millidegrees / 1000.0f;
+            if (temp_celsius > max_temp) {
+                max_temp = temp_celsius;
+            }
+        }
+    }
+    
+    // Try alternative path if no zones found
+    if (max_temp == 0.0f) {
+        std::ifstream file("/sys/class/thermal/thermal_zone0/temp");
+        if (file.is_open()) {
+            int temp_millidegrees;
+            file >> temp_millidegrees;
+            max_temp = temp_millidegrees / 1000.0f;
+        }
+    }
+    
+    return max_temp;
+}
+
+float SystemMonitor::read_power() {
+    float total_power = 0.0f;
+    
+    // Try multiple power rail paths
+    const std::vector<std::string> power_paths = {
+        "/sys/bus/i2c/drivers/ina3221x/0-0040/iio:device0/in_power0_input",
+        "/sys/bus/i2c/drivers/ina3221x/0-0041/iio:device0/in_power0_input",
+        "/sys/bus/i2c/drivers/ina3221x/1-0040/iio:device0/in_power0_input",
+        "/sys/bus/i2c/drivers/ina3221x/1-0041/iio:device0/in_power0_input"
+    };
+    
+    for (const auto& path : power_paths) {
+        std::ifstream file(path);
+        if (file.is_open()) {
+            int power_milliwatts;
+            file >> power_milliwatts;
+            total_power += power_milliwatts / 1000.0f;
+        }
+    }
+    
+    return total_power;
+}
+
+#else
+
+// Generic Linux or other platforms
+float SystemMonitor::read_temperature() {
+    std::ifstream file("/sys/class/thermal/thermal_zone0/temp");
+    if (file.is_open()) {
+        int temp_millidegrees;
+        file >> temp_millidegrees;
+        return temp_millidegrees / 1000.0f;
+    }
+    return 0.0f;
+}
+
+float SystemMonitor::read_power() {
+    return 0.0f;  // Not available on generic platforms
+}
+
+#endif
