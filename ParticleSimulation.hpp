@@ -53,6 +53,7 @@ constexpr int GRID_WIDTH = WINDOW_WIDTH / GRID_CELL_SIZE;
 constexpr int GRID_HEIGHT = WINDOW_HEIGHT / GRID_CELL_SIZE;
 constexpr int MAX_PARTICLES = 20000;
 constexpr int DEFAULT_PARTICLE_COUNT = 800;
+constexpr float DEFAULT_PARTICLE_RADIUS = 5.0f;
 
 // ============================================================================
 // OPTIMIZED PARTICLE STRUCTURE
@@ -245,11 +246,15 @@ struct PerformanceMetrics {
     double physics_time_ms;
     double render_time_ms;
     double frame_time_ms;
+    double total_physics_time_ms;
+    double total_render_time_ms;
     float temperature_c;
     float power_watts;
     
     PerformanceMetrics() : fps(0.0), physics_time_ms(0.0), render_time_ms(0.0),
-                          frame_time_ms(0.0), temperature_c(0.0f), power_watts(0.0f) {}
+                          frame_time_ms(0.0), total_physics_time_ms(0.0), 
+                          total_render_time_ms(0.0), temperature_c(0.0f), 
+                          power_watts(0.0f) {}
 };
 
 // ============================================================================
@@ -333,6 +338,7 @@ public:
     inline const std::vector<Particle>& get_particles() const { return particles; }
     inline Particle* get_particle_data() { return particles.data(); }
     inline int get_particle_count() const { return static_cast<int>(particles.size()); }
+    inline int get_max_particles() const { return max_particles; }
     
     // Grid access
     inline SpatialGrid& get_grid() { return *grid; }
@@ -460,6 +466,11 @@ public:
      * Performance summary printing
      */
     static void print_performance_summary(const PerformanceMetrics& metrics, ParallelMode mode);
+    
+    /**
+     * Get mode name string
+     */
+    static const char* get_mode_name(ParallelMode mode);
 };
 
 // ============================================================================
