@@ -150,11 +150,9 @@ static int* d_prefix_sum_temp = nullptr;          // For GPU-only prefix sum
 static bool gpu_initialized = false;
 static size_t total_gpu_memory_bytes = 0;
 
-// Grid configuration
-constexpr int GRID_WIDTH = 64;
-constexpr int GRID_HEIGHT = 36;
-constexpr int NUM_CELLS = GRID_WIDTH * GRID_HEIGHT;
-constexpr float CELL_SIZE = 15.0f;
+// Grid configuration - use values from header
+#define NUM_CELLS (GRID_WIDTH * GRID_HEIGHT)
+#define CELL_SIZE ((float)GRID_CELL_SIZE)
 
 // ============================================================================
 // DEVICE HELPER FUNCTIONS
@@ -583,20 +581,18 @@ void cleanup_gpu_memory() {
 // OPTIMIZATION 6: BATCHED CONSTANT UPDATES
 // ============================================================================
 
-void update_constants_if_needed(const Simulation* sim, 
-                                const PhysicsMetrics& metrics,
-                                bool verbose) {
+void update_constants_if_needed(const Simulation* sim, bool verbose) {
     SimulationConstants new_constants;
-    new_constants.friction = 0.995f;
-    new_constants.restitution = 0.8f;
-    new_constants.mouse_force = 50.0f;
+    new_constants.friction = sim->get_friction();
+    new_constants.restitution = sim->get_restitution();
+    new_constants.mouse_force = sim->get_mouse_force();
     new_constants.mouse_x = sim->get_mouse_x();
     new_constants.mouse_y = sim->get_mouse_y();
     new_constants.mouse_pressed = sim->is_mouse_pressed();
-    new_constants.mouse_attract = sim->is_mouse_attract_mode();
+    new_constants.mouse_attract = sim->is_mouse_attract();
     new_constants.dt = 0.016f;  // Fixed timestep
-    new_constants.width = static_cast<float>(sim->get_width());
-    new_constants.height = static_cast<float>(sim->get_height());
+    new_constants.width = static_cast<float>(sim->get_window_width());
+    new_constants.height = static_cast<float>(sim->get_window_height());
     
     // Only update if something changed
     if (!constants_initialized || 
@@ -616,14 +612,13 @@ void update_constants_if_needed(const Simulation* sim,
 // MAIN PHYSICS UPDATE FUNCTION - FULLY OPTIMIZED
 // ============================================================================
 
-extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
-                                                PhysicsMetrics& metrics,
-                                                bool verbose) {
+extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     double t_start = get_time_us();
     
     const int count = sim->get_particle_count();
     const int threads = 256;
     const int blocks = (count + threads - 1) / threads;
+    bool verbose = sim->is_verbose_logging();
     
     if (!gpu_initialized) {
         init_gpu_memory_optimized(sim->get_max_particles());
@@ -635,8 +630,8 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
     // OPTIMIZATION 6: Update constants only if changed (batched)
     CudaTimer timer_constants;
     timer_constants.begin();
-    update_constants_if_needed(sim, metrics, verbose);
-    metrics.gpu_constant_copy_ms = timer_constants.end();
+    update_constants_if_needed(sim, verbose);
+    double constant_copy_ms = timer_constants.end();
     
     // ========================================================================
     // KERNEL 1: Update particle positions
@@ -645,7 +640,7 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
     timer_update.begin();
     update_particles_kernel<<<blocks, threads>>>(d_particles, count, dt);
     CUDA_CHECK(cudaGetLastError());
-    metrics.gpu_update_kernel_ms = timer_update.end();
+    double update_kernel_ms = timer_update.end();
     
     // ========================================================================
     // OPTIMIZATION 2: Two-phase counting with shared memory
@@ -667,7 +662,7 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
         d_block_counts, d_grid_counts, blocks, NUM_CELLS);
     CUDA_CHECK(cudaGetLastError());
     
-    metrics.gpu_grid_count_kernel_ms = timer_count.end();
+    double grid_count_ms = timer_count.end();
     
     // ========================================================================
     // OPTIMIZATION 3: GPU-only prefix sum (no CPU synchronization)
@@ -688,7 +683,7 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
     reduce_block_counts_kernel<<<reduce_blocks, threads>>>(
         d_block_counts, d_grid_counts, blocks, NUM_CELLS);
     
-    metrics.gpu_prefix_sum_ms = timer_prefix.end();
+    double prefix_sum_ms = timer_prefix.end();
     
     // ========================================================================
     // KERNEL 4: Fill particle indices
@@ -703,7 +698,7 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
         d_particles, count, d_grid_indices, d_grid_starts, d_grid_counts);
     CUDA_CHECK(cudaGetLastError());
     
-    metrics.gpu_grid_fill_kernel_ms = timer_fill.end();
+    double grid_fill_ms = timer_fill.end();
     
     // Restore counts again for collision detection
     reduce_block_counts_kernel<<<reduce_blocks, threads>>>(
@@ -731,7 +726,7 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
         d_particles_sorted, d_grid_indices, d_grid_starts, d_grid_counts, count);
     CUDA_CHECK(cudaGetLastError());
     
-    metrics.gpu_collision_kernel_ms = timer_collision.end();
+    double collision_ms = timer_collision.end();
     
     // ========================================================================
     // Restore original particle order
@@ -755,35 +750,31 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt,
     memcpy(sim->get_particle_data(), d_particles, count * sizeof(Particle));
     
     double t_sync_end = get_time_us();
-    metrics.gpu_d2h_transfer_ms = (t_sync_end - t_sync_start) / 1000.0;
-    
-    // Track memory reordering overhead
-    metrics.gpu_sync_overhead_ms = reorder_time + restore_time;
+    double d2h_transfer_ms = (t_sync_end - t_sync_start) / 1000.0;
     
     double t_end = get_time_us();
     double total_time_ms = (t_end - t_start) / 1000.0;
     
-    metrics.particle_data_size_bytes = count * sizeof(Particle);
-    metrics.gpu_memory_used_bytes = total_gpu_memory_bytes;
+    size_t particle_data_size = count * sizeof(Particle);
     
     // Detailed profiling output
     if (verbose) {
         printf("\n[GPU COMPLEX - Frame %d] FULLY OPTIMIZED PIPELINE\n", sim->get_frame_counter());
         printf("================================================================================\n");
-        printf("Particles: %d (%zu bytes data)\n", count, metrics.particle_data_size_bytes);
+        printf("Particles: %d (%zu bytes data)\n", count, particle_data_size);
         printf("GPU Memory: %.2f MB total\n", total_gpu_memory_bytes / (1024.0 * 1024.0));
         printf("--------------------------------------------------------------------------------\n");
         printf("Constant copy:        %7.3f ms %s\n", 
-               metrics.gpu_constant_copy_ms,
-               metrics.gpu_constant_copy_ms == 0.0 ? "(cached)" : "");
-        printf("Update kernel:        %7.3f ms\n", metrics.gpu_update_kernel_ms);
-        printf("Count (2-phase):      %7.3f ms (shared memory)\n", metrics.gpu_grid_count_kernel_ms);
-        printf("Prefix sum (GPU):     %7.3f ms (Blelloch scan)\n", metrics.gpu_prefix_sum_ms);
-        printf("Fill indices:         %7.3f ms\n", metrics.gpu_grid_fill_kernel_ms);
+               constant_copy_ms,
+               constant_copy_ms == 0.0 ? "(cached)" : "");
+        printf("Update kernel:        %7.3f ms\n", update_kernel_ms);
+        printf("Count (2-phase):      %7.3f ms (shared memory)\n", grid_count_ms);
+        printf("Prefix sum (GPU):     %7.3f ms (Blelloch scan)\n", prefix_sum_ms);
+        printf("Fill indices:         %7.3f ms\n", grid_fill_ms);
         printf("Reorder particles:    %7.3f ms (coalescing)\n", reorder_time);
-        printf("Collision (shared):   %7.3f ms\n", metrics.gpu_collision_kernel_ms);
+        printf("Collision (shared):   %7.3f ms\n", collision_ms);
         printf("Restore order:        %7.3f ms\n", restore_time);
-        printf("Final sync:           %7.3f ms (unified memory)\n", metrics.gpu_d2h_transfer_ms);
+        printf("Final sync:           %7.3f ms (unified memory)\n", d2h_transfer_ms);
         printf("--------------------------------------------------------------------------------\n");
         printf("TOTAL FRAME TIME:     %7.3f ms (%.1f FPS)\n", 
                total_time_ms, 1000.0 / total_time_ms);
