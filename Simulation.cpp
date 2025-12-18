@@ -262,7 +262,7 @@ double Utils::get_time_ms() {
     using namespace std::chrono;
     auto now = high_resolution_clock::now();
     auto duration = now.time_since_epoch();
-    return duration_count<milliseconds>(duration);
+    return duration_cast<milliseconds>(duration).count();
 }
 
 float Utils::random_float(float min, float max) {
