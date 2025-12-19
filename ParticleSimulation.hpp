@@ -30,31 +30,26 @@ constexpr int GRID_HEIGHT = WINDOW_HEIGHT / GRID_CELL_SIZE;
 constexpr int MAX_PARTICLES = 20000;
 constexpr int DEFAULT_PARTICLE_COUNT = 800;
 constexpr float DEFAULT_PARTICLE_RADIUS = 5.0f;
+constexpr float DEFAULT_MOUSE_FORCE = 800.0f;
+constexpr float MOUSE_FORCE_MIN = 100.0f;
+constexpr float MOUSE_FORCE_MAX = 3000.0f;
+constexpr float MOUSE_FORCE_STEP = 100.0f;
+constexpr float MOUSE_FORCE_RADIUS = 400.0f;
 
 // ============================================================================
 // Optimized Particle Structure
 // ============================================================================
 
-/**
- * Cache-line aligned particle structure for optimal performance
- * 32-byte alignment matches ARM cache line size
- * Hot data (position, velocity) grouped at beginning
- */
 struct alignas(32) Particle {
-    // Hot data: Accessed every frame
-    float x, y;              // Position
-    float vx, vy;            // Velocity
-    
-    // Warm data: Accessed during collision detection
-    float radius;            // Collision radius
-    float mass;              // For momentum calculations
-    
-    // Cold data: Accessed only for rendering
-    uint8_t r, g, b;         // Color components
-    bool active;             // Enable/disable flag
+    float x, y;
+    float vx, vy;
+    float radius;
+    float mass;
+    uint8_t r, g, b;
+    bool active;
     
     Particle() : x(0.0f), y(0.0f), vx(0.0f), vy(0.0f),
-                 radius(5.0f), mass(1.0f),
+                 radius(DEFAULT_PARTICLE_RADIUS), mass(1.0f),
                  r(255), g(255), b(255), active(true) {}
 } __attribute__((packed));
 
@@ -77,10 +72,6 @@ enum class ParallelMode {
 // Optimized Spatial Grid
 // ============================================================================
 
-/**
- * High-performance spatial grid for O(n) collision detection
- * Three-phase construction: Count -> Prefix Sum -> Fill
- */
 class SpatialGrid {
 private:
     int grid_width;
@@ -146,7 +137,6 @@ public:
         }
     }
     
-    // Expose internals for parallel algorithms
     inline int get_num_cells() const { return num_cells; }
     inline int get_cell_count() const { return num_cells; }
     inline std::vector<int>& get_cell_counts() { return cell_counts; }
@@ -192,6 +182,7 @@ private:
     float friction;
     float restitution;
     float mouse_force;
+    float mouse_force_radius;
     
     int mouse_x, mouse_y;
     bool mouse_pressed;
@@ -205,6 +196,9 @@ private:
     PerformanceMetrics metrics;
     int frame_counter;
     
+    double fps_timer;
+    int fps_frame_count;
+    
 public:
     Simulation(int particle_count, int max_count = MAX_PARTICLES);
     ~Simulation();
@@ -217,22 +211,18 @@ public:
     void add_particles(int count);
     void remove_particles(int count);
     
-    // Particle access
     inline std::vector<Particle>& get_particles() { return particles; }
     inline const std::vector<Particle>& get_particles() const { return particles; }
     inline Particle* get_particle_data() { return particles.data(); }
     inline int get_particle_count() const { return static_cast<int>(particles.size()); }
     inline int get_max_particles() const { return max_particles; }
     
-    // Grid access
     inline SpatialGrid& get_grid() { return *grid; }
     inline const SpatialGrid& get_grid() const { return *grid; }
     
-    // Window dimensions
     inline int get_window_width() const { return window_width; }
     inline int get_window_height() const { return window_height; }
     
-    // Physics parameters
     inline float get_friction() const { return friction; }
     inline void set_friction(float f) { friction = f; }
     inline void adjust_friction(float delta) { 
@@ -244,8 +234,14 @@ public:
     inline void set_restitution(float r) { restitution = r; }
     inline float get_mouse_force() const { return mouse_force; }
     inline void set_mouse_force(float f) { mouse_force = f; }
+    inline void adjust_mouse_force(float delta) {
+        mouse_force += delta;
+        if (mouse_force < MOUSE_FORCE_MIN) mouse_force = MOUSE_FORCE_MIN;
+        if (mouse_force > MOUSE_FORCE_MAX) mouse_force = MOUSE_FORCE_MAX;
+    }
+    inline float get_mouse_force_radius() const { return mouse_force_radius; }
+    inline void set_mouse_force_radius(float r) { mouse_force_radius = r; }
     
-    // Mouse state
     inline int get_mouse_x() const { return mouse_x; }
     inline int get_mouse_y() const { return mouse_y; }
     inline bool is_mouse_pressed() const { return mouse_pressed; }
@@ -254,33 +250,40 @@ public:
         mouse_x = x; mouse_y = y;
         mouse_pressed = pressed; mouse_attract = attract;
     }
+    inline void update_mouse_position(int x, int y) {
+        mouse_x = x; mouse_y = y;
+    }
     
-    // Application control
     inline bool is_running() const { return running; }
     inline void set_running(bool r) { running = r; }
     inline void request_reset() { reset_requested = true; }
     
-    // Parallelization mode
     inline ParallelMode get_mode() const { return mode; }
     inline void set_mode(ParallelMode m) { mode = m; }
     
-    // Performance metrics
     inline const PerformanceMetrics& get_metrics() const { return metrics; }
+    inline PerformanceMetrics& get_metrics_mutable() { return metrics; }
     inline void set_fps(double fps) { metrics.fps = fps; }
-    inline void set_physics_time(double ms) { metrics.physics_time_ms = ms; }
-    inline void set_render_time(double ms) { metrics.render_time_ms = ms; }
+    inline void set_physics_time(double ms) { 
+        metrics.physics_time_ms = ms; 
+        metrics.total_physics_time_ms = ms;
+    }
+    inline void set_render_time(double ms) { 
+        metrics.render_time_ms = ms; 
+        metrics.total_render_time_ms = ms;
+    }
     inline void set_frame_time(double ms) { metrics.frame_time_ms = ms; }
     inline void set_temperature(float temp) { metrics.temperature_c = temp; }
     inline void set_power(float watts) { metrics.power_watts = watts; }
     
-    // Logging
     inline bool is_verbose() const { return verbose_logging; }
     inline bool is_verbose_logging() const { return verbose_logging; }
     inline void set_verbose(bool v) { verbose_logging = v; }
     inline void set_verbose_logging(bool v) { verbose_logging = v; }
     
-    // Frame counter
     inline int get_frame_counter() const { return frame_counter; }
+    
+    void update_fps(double dt);
 };
 
 // ============================================================================
