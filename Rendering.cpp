@@ -391,7 +391,7 @@ public:
         y += line_height + 5;
         
         // Status
-        ss.str("");
+        std::ostringstream ss;
         ss << "Status: " << (sim.is_running() ? "Running" : "Paused");
         render_text(ss.str(), x, y, sim.is_running() ? highlight : white);
         y += line_height;
