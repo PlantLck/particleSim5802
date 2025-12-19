@@ -7,6 +7,7 @@
 particle_sim
 particle_sim_mpi
 particle_sim_cuda
+particle_sim_full
 *.exe
 *.out
 
