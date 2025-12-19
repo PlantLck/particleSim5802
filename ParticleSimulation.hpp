@@ -1,30 +1,6 @@
 /*
- * OPTIMIZED Particle Simulation Header
- * High-Performance Parallel Computing - Comprehensive Optimization Framework
- * 
- * This header defines optimized data structures and interfaces for maximum
- * performance across all parallelization paradigms (Sequential, OpenMP, MPI, CUDA).
- * 
- * KEY OPTIMIZATIONS IN THIS FILE:
- * ================================
- * 
- * DATA STRUCTURE OPTIMIZATIONS:
- * - Cache-line aligned Particle structure (32-byte alignment)
- * - Hot data grouped together for cache efficiency
- * - POD types for CUDA compatibility
- * - Optimized memory layout for SIMD vectorization
- * 
- * SPATIAL GRID OPTIMIZATIONS:
- * - Parallel construction support
- * - Cache-friendly blocked iteration
- * - Exposed internals for advanced parallel algorithms
- * - Incremental update capability (future optimization)
- * 
- * INTERFACE DESIGN:
- * - Zero-cost abstractions
- * - Minimal virtual function overhead
- * - Static polymorphism where possible
- * - RAII for automatic resource management
+ * Particle Simulation Header
+ * High-performance parallel computing framework for particle physics
  */
 
 #ifndef PARTICLE_SIMULATION_HPP
@@ -36,14 +12,14 @@
 #include <cmath>
 
 // ============================================================================
-// FORWARD DECLARATIONS
+// Forward Declarations
 // ============================================================================
 
 class SpatialGrid;
 class SystemMonitor;
 
 // ============================================================================
-// CONFIGURATION CONSTANTS
+// Configuration Constants
 // ============================================================================
 
 constexpr int WINDOW_WIDTH = 1920;
@@ -56,90 +32,54 @@ constexpr int DEFAULT_PARTICLE_COUNT = 800;
 constexpr float DEFAULT_PARTICLE_RADIUS = 5.0f;
 
 // ============================================================================
-// OPTIMIZED PARTICLE STRUCTURE
+// Optimized Particle Structure
 // ============================================================================
 
 /**
- * Particle structure optimized for cache performance and CUDA compatibility
- * 
- * OPTIMIZATION RATIONALE:
- * - 32-byte alignment matches ARM cache line size on Jetson Xavier NX
- * - Hot data (position, velocity) grouped at beginning
- * - Physics properties (radius, mass) follow for collision detection
- * - Cold data (color, active flag) at end
- * - Total size: 28 bytes + 4 padding = 32 bytes (one cache line)
- * 
- * MEMORY LAYOUT:
- * [x, y, vx, vy] - 16 bytes - Accessed every frame for physics
- * [radius, mass] - 8 bytes - Accessed during collision detection
- * [r, g, b, active] - 4 bytes - Accessed only during rendering
- * [padding] - 4 bytes - Align to 32-byte boundary
- * 
- * CACHE EFFICIENCY:
- * - Physics updates: 100% cache line utilization (all hot data in one line)
- * - Collision detection: One cache line load per particle
- * - Rendering: Cache line already loaded from physics pass
+ * Cache-line aligned particle structure for optimal performance
+ * 32-byte alignment matches ARM cache line size
+ * Hot data (position, velocity) grouped at beginning
  */
 struct alignas(32) Particle {
-    // HOT DATA: Accessed every frame (16 bytes)
-    float x, y;              // Position (most frequently accessed)
+    // Hot data: Accessed every frame
+    float x, y;              // Position
     float vx, vy;            // Velocity
     
-    // WARM DATA: Accessed during collision detection (8 bytes)
+    // Warm data: Accessed during collision detection
     float radius;            // Collision radius
     float mass;              // For momentum calculations
     
-    // COLD DATA: Accessed only for rendering (4 bytes)
+    // Cold data: Accessed only for rendering
     uint8_t r, g, b;         // Color components
     bool active;             // Enable/disable flag
     
-    // PADDING: Align to 32 bytes (4 bytes)
-    // Compiler automatically adds padding due to alignas(32)
-    
-    // Default constructor for array initialization
     Particle() : x(0.0f), y(0.0f), vx(0.0f), vy(0.0f),
                  radius(5.0f), mass(1.0f),
                  r(255), g(255), b(255), active(true) {}
 } __attribute__((packed));
 
-// Compile-time verification
 static_assert(sizeof(Particle) == 32, "Particle must be exactly 32 bytes");
 static_assert(alignof(Particle) == 32, "Particle must be 32-byte aligned");
 
 // ============================================================================
-// PARALLELIZATION MODE ENUMERATION
+// Parallelization Mode Enumeration
 // ============================================================================
 
 enum class ParallelMode {
-    SEQUENTIAL = 0,      // Single-threaded baseline
-    MULTITHREADED = 1,   // OpenMP shared-memory parallelization
-    MPI = 2,             // Distributed-memory parallelization
-    GPU_SIMPLE = 3,      // Basic GPU acceleration
-    GPU_COMPLEX = 4      // Optimized GPU with spatial grid
+    SEQUENTIAL = 0,
+    MULTITHREADED = 1,
+    MPI = 2,
+    GPU_SIMPLE = 3,
+    GPU_COMPLEX = 4
 };
 
 // ============================================================================
-// OPTIMIZED SPATIAL GRID
+// Optimized Spatial Grid
 // ============================================================================
 
 /**
  * High-performance spatial grid for O(n) collision detection
- * 
- * OPTIMIZATION FEATURES:
- * - Parallel construction support (OpenMP)
- * - Cache-friendly blocked iteration
- * - Exposed internals for advanced algorithms
- * - Vectorized operations where possible
- * 
- * ALGORITHM:
- * 1. Count particles per cell (parallelizable)
- * 2. Prefix sum to compute cell starts (parallel scan)
- * 3. Fill particle indices (parallelizable)
- * 
- * MEMORY LAYOUT:
- * - particle_indices: [p0, p1, p2, ...] sorted by grid cell
- * - cell_starts: [0, 3, 7, ...] start index for each cell
- * - cell_counts: [3, 4, 2, ...] number of particles in each cell
+ * Three-phase construction: Count -> Prefix Sum -> Fill
  */
 class SpatialGrid {
 private:
@@ -148,14 +88,11 @@ private:
     float cell_size;
     int num_cells;
     
-    std::vector<int> particle_indices;  // Particle IDs sorted by cell
-    std::vector<int> cell_starts;       // Start index for each cell
-    std::vector<int> cell_counts;       // Particle count per cell
+    std::vector<int> particle_indices;
+    std::vector<int> cell_starts;
+    std::vector<int> cell_counts;
     
 public:
-    /**
-     * Constructor: Initialize grid structure
-     */
     SpatialGrid(int width, int height, float size)
         : grid_width(width), grid_height(height),
           cell_size(size), num_cells(width * height) {
@@ -165,10 +102,6 @@ public:
         particle_indices.resize(MAX_PARTICLES, -1);
     }
     
-    /**
-     * Get grid cell index for world coordinates
-     * OPTIMIZATION: Inline for hot path
-     */
     inline int get_cell_index(float x, float y) const {
         int grid_x = static_cast<int>(x / cell_size);
         int grid_y = static_cast<int>(y / cell_size);
@@ -181,32 +114,22 @@ public:
         return grid_y * grid_width + grid_x;
     }
     
-    /**
-     * Sequential grid update (baseline implementation)
-     */
     void update(std::vector<Particle>& particles);
     
-    /**
-     * Get nearby particles within radius
-     * OPTIMIZATION: Inline for collision detection hot path
-     */
     inline void get_nearby_particles(float x, float y, float radius,
                                      std::vector<int>& nearby) const {
         nearby.clear();
         
-        // Calculate grid cell range
         int min_grid_x = static_cast<int>((x - radius) / cell_size);
         int max_grid_x = static_cast<int>((x + radius) / cell_size);
         int min_grid_y = static_cast<int>((y - radius) / cell_size);
         int max_grid_y = static_cast<int>((y + radius) / cell_size);
         
-        // Clamp to grid bounds
         if (min_grid_x < 0) min_grid_x = 0;
         if (max_grid_x >= grid_width) max_grid_x = grid_width - 1;
         if (min_grid_y < 0) min_grid_y = 0;
         if (max_grid_y >= grid_height) max_grid_y = grid_height - 1;
         
-        // Collect particles from nearby cells
         for (int gy = min_grid_y; gy <= max_grid_y; gy++) {
             for (int gx = min_grid_x; gx <= max_grid_x; gx++) {
                 int cell_idx = gy * grid_width + gx;
@@ -223,12 +146,9 @@ public:
         }
     }
     
-    /**
-     * OPTIMIZATION: Expose internals for parallel algorithms
-     * These allow advanced parallel implementations to directly access
-     * and modify grid data structures without going through methods
-     */
+    // Expose internals for parallel algorithms
     inline int get_num_cells() const { return num_cells; }
+    inline int get_cell_count() const { return num_cells; }
     inline std::vector<int>& get_cell_counts() { return cell_counts; }
     inline std::vector<int>& get_cell_starts() { return cell_starts; }
     inline std::vector<int>& get_particle_indices() { return particle_indices; }
@@ -238,7 +158,7 @@ public:
 };
 
 // ============================================================================
-// PERFORMANCE METRICS STRUCTURE
+// Performance Metrics Structure
 // ============================================================================
 
 struct PerformanceMetrics {
@@ -258,26 +178,14 @@ struct PerformanceMetrics {
 };
 
 // ============================================================================
-// MAIN SIMULATION CLASS
+// Main Simulation Class
 // ============================================================================
 
-/**
- * Central simulation state and coordination
- * 
- * DESIGN PRINCIPLES:
- * - RAII: Automatic resource management
- * - Value semantics for particles (std::vector)
- * - Unique ownership for grid (std::unique_ptr)
- * - No manual memory management
- * - Exception-safe by construction
- */
 class Simulation {
 private:
-    // Particle state
     std::vector<Particle> particles;
     std::unique_ptr<SpatialGrid> grid;
     
-    // Simulation parameters
     int max_particles;
     int window_width;
     int window_height;
@@ -285,53 +193,29 @@ private:
     float restitution;
     float mouse_force;
     
-    // Mouse state
     int mouse_x, mouse_y;
     bool mouse_pressed;
     bool mouse_attract;
     
-    // Application state
     bool running;
     bool reset_requested;
     ParallelMode mode;
     bool verbose_logging;
     
-    // Performance metrics
     PerformanceMetrics metrics;
     int frame_counter;
     
 public:
-    /**
-     * Constructor: Initialize simulation with default parameters
-     */
     Simulation(int particle_count, int max_count = MAX_PARTICLES);
-    
-    /**
-     * Destructor: Cleanup (CUDA memory freed here)
-     */
     ~Simulation();
     
-    /**
-     * Main update function: Delegates to appropriate physics engine
-     */
     void update(float dt);
-    
-    /**
-     * Reset simulation state
-     */
     void reset();
     
-    /**
-     * Particle management
-     */
     void spawn_particle(float x, float y, float vx, float vy);
     void spawn_random_particles(int count);
     void add_particles(int count);
     void remove_particles(int count);
-    
-    // ========================================================================
-    // GETTERS AND SETTERS
-    // ========================================================================
     
     // Particle access
     inline std::vector<Particle>& get_particles() { return particles; }
@@ -400,103 +284,44 @@ public:
 };
 
 // ============================================================================
-// PHYSICS ENGINE INTERFACE
+// Physics Engine Interface
 // ============================================================================
 
-/**
- * Static physics engine with multiple implementation modes
- * 
- * DESIGN: Static methods allow compiler to optimize aggressively
- * No virtual function overhead, direct function calls
- */
 class PhysicsEngine {
 public:
-    /**
-     * MODE 1: Sequential (Optimized Baseline)
-     * OPTIMIZATIONS: Cache-friendly iteration, early exits, compiler hints
-     * TARGET: 1.5× improvement over naive implementation
-     */
     static void update_sequential(Simulation& sim, float dt);
-    
-    /**
-     * MODE 2: Multithreaded (OpenMP)
-     * OPTIMIZATIONS: Parallel grid, persistent regions, optimized scheduling
-     * TARGET: 4.5-5.0× speedup on 6-core system
-     */
     static void update_multithreaded(Simulation& sim, float dt);
-    
-    /**
-     * MODE 3: Distributed (MPI)
-     * OPTIMIZATIONS: Allgather, minimal data, combined broadcasts
-     * TARGET: 3.5-4.0× speedup on 4 processes
-     */
     static void update_mpi(Simulation& sim, float dt);
-    
-    /**
-     * MODE 4: GPU Simple (CUDA Basic)
-     * Basic GPU implementation for comparison
-     */
     static void update_gpu_simple(Simulation& sim, float dt);
-    
-    /**
-     * MODE 5: GPU Complex (CUDA Optimized)
-     * Full GPU optimization with spatial grid
-     */
     static void update_gpu_complex(Simulation& sim, float dt);
 };
 
 // ============================================================================
-// UTILITY FUNCTIONS
+// Utility Functions
 // ============================================================================
 
 class Utils {
 public:
-    /**
-     * High-resolution timing
-     */
     static double get_time_ms();
-    
-    /**
-     * Random number generation
-     */
     static float random_float(float min, float max);
     static int random_int(int min, int max);
-    
-    /**
-     * Performance summary printing
-     */
     static void print_performance_summary(const PerformanceMetrics& metrics, ParallelMode mode);
-    
-    /**
-     * Get mode name string
-     */
     static const char* get_mode_name(ParallelMode mode);
 };
 
 // ============================================================================
-// SYSTEM MONITORING
+// System Monitoring
 // ============================================================================
 
 class SystemMonitor {
 public:
-    /**
-     * Update system metrics (temperature, power)
-     */
     static void update_metrics(Simulation& sim);
-    
-    /**
-     * Platform-specific temperature reading
-     */
     static float read_temperature();
-    
-    /**
-     * Platform-specific power reading
-     */
     static float read_power();
 };
 
 // ============================================================================
-// CUDA INTERFACE (if available)
+// CUDA Interface
 // ============================================================================
 
 #ifdef USE_CUDA
