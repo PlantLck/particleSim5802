@@ -1,3 +1,8 @@
+/*
+ * SDL2 Rendering Implementation
+ * Graphics, UI, and optimized particle visualization
+ */
+
 #include "ParticleSimulation.hpp"
 #include <SDL.h>
 #include <SDL_ttf.h>
@@ -8,7 +13,7 @@
 #include <cmath>
 
 // ============================================================================
-// Graphics class for SDL rendering - OPTIMIZED VERSION
+// Graphics Implementation
 // ============================================================================
 
 class Graphics {
@@ -19,22 +24,17 @@ private:
     bool show_menu;
     bool show_stats;
     
-    // OPTIMIZATION: Pre-rendered particle texture for fast rendering
+    // Pre-rendered particle texture for performance
     SDL_Texture* particle_texture;
     int cached_particle_radius;
     
-    // ========================================================================
-    // OPTIMIZATION: Create particle texture once, reuse with color modulation
-    // This avoids drawing 28 pixels per particle, 1500 times per frame
-    // Instead: 1 texture copy per particle (much faster)
-    // ========================================================================
+    // Create reusable particle texture with color modulation
     SDL_Texture* create_particle_texture(int radius) {
-        // Create texture
         SDL_Texture* tex = SDL_CreateTexture(
             renderer,
             SDL_PIXELFORMAT_RGBA8888,
             SDL_TEXTUREACCESS_TARGET,
-            radius * 2 + 2,  // Add padding
+            radius * 2 + 2,
             radius * 2 + 2
         );
         
@@ -48,14 +48,11 @@ private:
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
         SDL_RenderClear(renderer);
         
-        // Draw white filled circle using optimized algorithm
+        // Draw white filled circle
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         draw_filled_circle_fast(radius + 1, radius + 1, radius);
         
-        // Enable color modulation and alpha blending
         SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        
-        // Reset render target
         SDL_SetRenderTarget(renderer, nullptr);
         
         printf("[Rendering] Created particle texture: %dx%d pixels\n", 
@@ -64,21 +61,14 @@ private:
         return tex;
     }
     
-    // ========================================================================
-    // OPTIMIZATION: Bresenham-based circle algorithm
-    // Standard algorithm: O(r²) iterations per circle
-    // Bresenham: O(r) iterations using 8-way symmetry
-    // Speedup: ~8x for circle drawing
-    // ========================================================================
+    // Bresenham circle algorithm with 8-way symmetry
     void draw_filled_circle_fast(int cx, int cy, int radius) {
         if (radius <= 0) return;
         
-        // Bresenham circle algorithm variables
         int x = 0;
         int y = radius;
         int d = 3 - 2 * radius;
         
-        // Helper lambda for drawing horizontal lines (fill)
         auto draw_hline = [this](int x1, int x2, int y) {
             if (x1 > x2) std::swap(x1, x2);
             for (int x = x1; x <= x2; x++) {
@@ -86,13 +76,11 @@ private:
             }
         };
         
-        // Draw initial lines
         draw_hline(cx - radius, cx + radius, cy);
         
         while (x <= y) {
             x++;
             
-            // Update decision parameter
             if (d < 0) {
                 d = d + 4 * x + 6;
             } else {
@@ -100,7 +88,6 @@ private:
                 d = d + 4 * (x - y) + 10;
             }
             
-            // Draw horizontal lines for all 8 octants
             if (x <= y) {
                 draw_hline(cx - x, cx + x, cy + y);
                 draw_hline(cx - x, cx + x, cy - y);
@@ -110,7 +97,7 @@ private:
         }
     }
     
-    // Legacy circle drawing (kept for fallback)
+    // Legacy fallback for compatibility
     void draw_filled_circle(int cx, int cy, int radius) {
         for (int y = -radius; y <= radius; y++) {
             for (int x = -radius; x <= radius; x++) {
@@ -163,13 +150,11 @@ public:
             return false;
         }
         
-        // Try to load font from multiple possible locations
+        // Try to load font from common system locations
         const char* font_paths[] = {
-            // Windows paths
             "C:/Windows/Fonts/arial.ttf",
             "C:/Windows/Fonts/calibri.ttf",
             "C:/Windows/Fonts/segoeui.ttf",
-            // Linux paths
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
             nullptr
@@ -188,7 +173,7 @@ public:
             fprintf(stderr, "Text rendering will not be available.\n");
         }
         
-        // Create particle texture for default radius
+        // Create particle texture
         particle_texture = create_particle_texture(static_cast<int>(DEFAULT_PARTICLE_RADIUS));
         cached_particle_radius = static_cast<int>(DEFAULT_PARTICLE_RADIUS);
         
@@ -197,7 +182,6 @@ public:
         }
         
         printf("[Rendering] Optimization: Texture-based particle rendering enabled\n");
-        printf("[Rendering] Expected speedup: 2-3x over pixel-based rendering\n");
         
         return true;
     }
@@ -239,22 +223,15 @@ public:
         SDL_FreeSurface(surface);
     }
     
-    // ========================================================================
-    // OPTIMIZED PARTICLE RENDERING
-    // Old method: 1500 particles × 28 pixels = 42,000 SDL_RenderDrawPoint calls
-    // New method: 1500 SDL_RenderCopy calls with color modulation
-    // Speedup: ~2-3x faster
-    // ========================================================================
     void render_particles(Simulation& sim) {
         double start_time = Utils::get_time_ms();
         
-        // Clear screen
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
         
         const auto& particles = sim.get_particles();
         
-        // Check if we need to recreate texture (particle size changed)
+        // Recreate texture if particle size changed
         if (!particles.empty() && 
             static_cast<int>(particles[0].radius) != cached_particle_radius) {
             
@@ -269,16 +246,14 @@ public:
                    cached_particle_radius);
         }
         
-        // Draw all particles using optimized texture-based rendering
+        // Render particles using texture or fallback
         if (particle_texture) {
-            // OPTIMIZED PATH: Use pre-rendered texture
+            // Optimized: texture-based rendering with color modulation
             for (const auto& p : particles) {
                 if (!p.active) continue;
                 
-                // Set color via modulation (much faster than redrawing)
                 SDL_SetTextureColorMod(particle_texture, p.r, p.g, p.b);
                 
-                // Copy texture to screen (hardware accelerated)
                 SDL_Rect dst = {
                     static_cast<int>(p.x - p.radius) - 1,
                     static_cast<int>(p.y - p.radius) - 1,
@@ -289,7 +264,7 @@ public:
                 SDL_RenderCopy(renderer, particle_texture, nullptr, &dst);
             }
         } else {
-            // FALLBACK PATH: Use optimized Bresenham algorithm
+            // Fallback: Bresenham algorithm
             for (const auto& p : particles) {
                 if (!p.active) continue;
                 
@@ -317,8 +292,9 @@ public:
         int y_offset = 10;
         int line_height = 20;
         
-        // FPS
         std::ostringstream ss;
+        
+        // FPS
         ss << "FPS: " << std::fixed << std::setprecision(1) << metrics.fps;
         render_text(ss.str(), 10, y_offset, green);
         y_offset += line_height;
@@ -341,7 +317,7 @@ public:
         render_text(ss.str(), 10, y_offset, white);
         y_offset += line_height;
         
-        // Render time with optimization indicator
+        // Render time
         ss.str("");
         ss << "Render: " << std::fixed << std::setprecision(2) << metrics.total_render_time_ms << " ms";
         if (particle_texture) {
@@ -358,7 +334,7 @@ public:
         render_text(ss.str(), 10, y_offset, white);
         y_offset += line_height;
         
-        // Temperature
+        // Temperature with color coding
         SDL_Color temp_color = white;
         if (metrics.temperature_c > 70.0f) temp_color = red;
         else if (metrics.temperature_c > 55.0f) temp_color = yellow;
@@ -380,18 +356,21 @@ public:
         SDL_Color white = {255, 255, 255, 255};
         SDL_Color highlight = {100, 255, 255, 255};
         
-        // Draw semi-transparent background
+        // Semi-transparent background
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-        SDL_Rect menu_rect = {WINDOW_WIDTH - 350, 10, 340, 400};
+        SDL_Rect menu_rect = {WINDOW_WIDTH - 320, 10, 310, 200};
         SDL_RenderFillRect(renderer, &menu_rect);
         
-        int x = WINDOW_WIDTH - 340;
+        int x = WINDOW_WIDTH - 310;
         int y = 20;
-        int line_height = 25;
+        int line_height = 20;
         
-        render_text("=== CONTROLS ===", x, y, white);
-        y += static_cast<int>(line_height * 1.5);
+        render_text("=== CONTROLS ===", x, y, highlight);
+        y += line_height + 5;
+        
+        render_text("[1-5] Switch Mode", x, y, white);
+        y += line_height;
         
         render_text("[M] Toggle Menu", x, y, white);
         y += line_height;
@@ -399,49 +378,25 @@ public:
         render_text("[SPACE] Pause/Resume", x, y, white);
         y += line_height;
         
-        render_text("[R] Reset Simulation", x, y, white);
+        render_text("[R] Reset", x, y, white);
         y += line_height;
         
         render_text("[+/-] Add/Remove Particles", x, y, white);
         y += line_height;
         
-        render_text("[1-5] Change Parallel Mode", x, y, white);
+        render_text("[LMB] Attract", x, y, white);
         y += line_height;
         
-        render_text("[F/G] Decrease/Increase Friction", x, y, white);
-        y += line_height;
+        render_text("[RMB] Repel", x, y, white);
+        y += line_height + 5;
         
-        render_text("[L] Toggle Verbose Logging", x, y, white);
-        y += line_height;
-        
-        render_text("[Mouse Click] Attract Particles", x, y, white);
-        y += line_height;
-        
-        render_text("[Right Click] Repel Particles", x, y, white);
-        y += line_height;
-        
-        render_text("[ESC] Exit", x, y, white);
-        y += static_cast<int>(line_height * 1.5);
-        
-        render_text("=== CURRENT SETTINGS ===", x, y, white);
-        y += static_cast<int>(line_height * 1.5);
-        
-        std::ostringstream ss;
-        ss << "Particles: " << sim.get_particle_count() << " / " << sim.get_max_particles();
-        render_text(ss.str(), x, y, white);
-        y += line_height;
-        
-        ss.str("");
-        ss << "Friction: " << std::fixed << std::setprecision(4) << sim.get_friction();
-        render_text(ss.str(), x, y, white);
-        y += line_height;
-        
+        // Status
         ss.str("");
         ss << "Status: " << (sim.is_running() ? "Running" : "Paused");
         render_text(ss.str(), x, y, sim.is_running() ? highlight : white);
         y += line_height;
         
-        // Show optimization status
+        // Rendering mode
         ss.str("");
         ss << "Rendering: " << (particle_texture ? "Optimized" : "Fallback");
         render_text(ss.str(), x, y, particle_texture ? highlight : white);
@@ -456,7 +411,7 @@ public:
 };
 
 // ============================================================================
-// Global Graphics Instance (for main.cpp to access)
+// Global Graphics Instance
 // ============================================================================
 
 static std::unique_ptr<Graphics> g_graphics;
