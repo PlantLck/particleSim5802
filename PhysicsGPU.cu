@@ -612,20 +612,170 @@ void update_constants_if_needed(const Simulation* sim, bool verbose) {
 // MAIN PHYSICS UPDATE FUNCTION - FULLY OPTIMIZED
 // ============================================================================
 
+// ============================================================================
+// SIMPLE KERNELS - NO SPATIAL GRID OPTIMIZATION
+// ============================================================================
+
 /**
- * Basic GPU physics implementation for Mode 4 (GPU Simple)
- * 
- * This function provides a simple GPU implementation that delegates to the
- * optimized complex version to resolve the undefined reference error.
- * 
- * IMPLEMENTATION NOTE:
- * For immediate deployment, this delegates to update_physics_gpu_complex_cuda.
- * For true performance comparison, you could implement a brute-force version.
+ * Simple particle update kernel - basic physics only
+ */
+__global__ void update_particles_simple_kernel(Particle* particles, int count, float dt) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= count) return;
+    
+    Particle* p = &particles[idx];
+    if (!p->active) return;
+    
+    // Apply friction
+    if (d_constants.friction > 0.0f) {
+        float friction_factor = 1.0f - d_constants.friction;
+        p->vx *= friction_factor;
+        p->vy *= friction_factor;
+    }
+    
+    // Apply mouse force
+    apply_mouse_force_gpu(p);
+    
+    // Euler integration
+    p->x += p->vx * dt;
+    p->y += p->vy * dt;
+    
+    // Wall collision detection
+    if (p->x - p->radius < 0.0f) {
+        p->x = p->radius;
+        p->vx = -p->vx * d_constants.restitution;
+    }
+    if (p->x + p->radius > d_constants.width) {
+        p->x = d_constants.width - p->radius;
+        p->vx = -p->vx * d_constants.restitution;
+    }
+    if (p->y - p->radius < 0.0f) {
+        p->y = p->radius;
+        p->vy = -p->vy * d_constants.restitution;
+    }
+    if (p->y + p->radius > d_constants.height) {
+        p->y = d_constants.height - p->radius;
+        p->vy = -p->vy * d_constants.restitution;
+    }
+    
+    // Velocity limiting
+    float vel_sq = p->vx * p->vx + p->vy * p->vy;
+    if (vel_sq > MAX_VELOCITY * MAX_VELOCITY) {
+        float vel = sqrtf(vel_sq);
+        p->vx = (p->vx / vel) * MAX_VELOCITY;
+        p->vy = (p->vy / vel) * MAX_VELOCITY;
+    }
+}
+
+/**
+ * Brute-force collision detection kernel - O(n²) complexity
+ * Each thread checks its particle against ALL other particles
+ * This is the baseline non-optimized approach
+ */
+__global__ void detect_collisions_simple_kernel(Particle* particles, int count) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= count) return;
+    
+    Particle* p1 = &particles[idx];
+    if (!p1->active) return;
+    
+    // Check against ALL other particles (brute force O(n²))
+    for (int j = idx + 1; j < count; j++) {
+        Particle* p2 = &particles[j];
+        if (!p2->active) continue;
+        
+        // Calculate distance
+        float dx = p2->x - p1->x;
+        float dy = p2->y - p1->y;
+        float dist_sq = dx * dx + dy * dy;
+        float min_dist = p1->radius + p2->radius;
+        
+        // Check collision
+        if (dist_sq < min_dist * min_dist && dist_sq > 1e-6f) {
+            float dist = sqrtf(dist_sq);
+            float overlap = min_dist - dist;
+            
+            // Normalize collision vector
+            float nx = dx / dist;
+            float ny = dy / dist;
+            
+            // Separate particles
+            float total_mass = p1->mass + p2->mass;
+            float ratio1 = p2->mass / total_mass;
+            float ratio2 = p1->mass / total_mass;
+            
+            p1->x -= nx * overlap * ratio1;
+            p1->y -= ny * overlap * ratio1;
+            p2->x += nx * overlap * ratio2;
+            p2->y += ny * overlap * ratio2;
+            
+            // Calculate relative velocity
+            float dvx = p2->vx - p1->vx;
+            float dvy = p2->vy - p1->vy;
+            float rel_vel = dvx * nx + dvy * ny;
+            
+            // Only resolve if particles are moving toward each other
+            if (rel_vel < 0.0f) {
+                // Calculate impulse
+                float impulse_mag = -(1.0f + d_constants.restitution) * rel_vel / (1.0f/p1->mass + 1.0f/p2->mass);
+                float impulse_x = impulse_mag * nx;
+                float impulse_y = impulse_mag * ny;
+                
+                // Apply impulse
+                p1->vx -= impulse_x / p1->mass;
+                p1->vy -= impulse_y / p1->mass;
+                p2->vx += impulse_x / p2->mass;
+                p2->vy += impulse_y / p2->mass;
+            }
+        }
+    }
+}
+
+/**
+ * GPU Simple physics update - baseline brute-force implementation
+ * This provides a true performance comparison baseline without optimizations
  */
 extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
-    // Delegate to the optimized implementation
-    // This resolves the compilation error while maintaining functionality
-    update_physics_gpu_complex_cuda(sim, dt);
+    double t_start = get_time_us();
+    
+    const int count = sim->get_particle_count();
+    const int threads = 256;
+    const int blocks = (count + threads - 1) / threads;
+    bool verbose = sim->is_verbose_logging();
+    
+    if (!gpu_initialized) {
+        init_gpu_memory_optimized(sim->get_max_particles());
+    }
+    
+    // Copy particle data to GPU
+    memcpy(d_particles, sim->get_particle_data(), count * sizeof(Particle));
+    
+    // Update constants if needed
+    update_constants_if_needed(sim, verbose);
+    
+    // Launch simple kernels (no spatial grid)
+    update_particles_simple_kernel<<<blocks, threads>>>(d_particles, count, dt);
+    CUDA_CHECK(cudaGetLastError());
+    
+    detect_collisions_simple_kernel<<<blocks, threads>>>(d_particles, count);
+    CUDA_CHECK(cudaGetLastError());
+    
+    // Synchronize and copy results back
+    CUDA_CHECK(cudaDeviceSynchronize());
+    memcpy(sim->get_particle_data(), d_particles, count * sizeof(Particle));
+    
+    double t_end = get_time_us();
+    double total_time_ms = (t_end - t_start) / 1000.0;
+    
+    if (verbose) {
+        printf("\n[GPU SIMPLE - Frame %d] BRUTE FORCE O(n²) IMPLEMENTATION\n", 
+               sim->get_frame_counter());
+        printf("================================================================================\n");
+        printf("Particles: %d\n", count);
+        printf("Collision checks: %d (brute force, no spatial grid)\n", (count * (count - 1)) / 2);
+        printf("Total time: %.3f ms (%.1f FPS)\n", total_time_ms, 1000.0 / total_time_ms);
+        printf("================================================================================\n\n");
+    }
 }
 
 extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
