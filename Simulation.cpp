@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstring>
+#include <chrono>
 
 #ifdef USE_CUDA
 extern "C" void cleanup_gpu_memory();
@@ -224,33 +225,31 @@ void Simulation::remove_particles(int count) {
 }
 
 // ============================================================================
-// Utility Functions
+// Utility Functions Implementation
 // ============================================================================
 
-namespace Utils {
-    double get_time_ms() {
-        auto now = std::chrono::high_resolution_clock::now();
-        auto duration = now.time_since_epoch();
-        return std::chrono::duration<double, std::milli>(duration).count();
-    }
-    
-    float random_float(float min, float max) {
-        return min + static_cast<float>(std::rand()) / 
-               (static_cast<float>(RAND_MAX / (max - min)));
-    }
-    
-    int random_int(int min, int max) {
-        return min + std::rand() % (max - min + 1);
-    }
-    
-    const char* get_mode_name(ParallelMode mode) {
-        switch (mode) {
-            case ParallelMode::SEQUENTIAL: return "Sequential";
-            case ParallelMode::MULTITHREADED: return "Multithreaded (OpenMP)";
-            case ParallelMode::MPI: return "MPI";
-            case ParallelMode::GPU_SIMPLE: return "GPU Simple";
-            case ParallelMode::GPU_COMPLEX: return "GPU Complex";
-            default: return "Unknown";
-        }
+double Utils::get_time_ms() {
+    auto now = std::chrono::high_resolution_clock::now();
+    auto duration = now.time_since_epoch();
+    return std::chrono::duration<double, std::milli>(duration).count();
+}
+
+float Utils::random_float(float min, float max) {
+    return min + static_cast<float>(std::rand()) / 
+           (static_cast<float>(RAND_MAX / (max - min)));
+}
+
+int Utils::random_int(int min, int max) {
+    return min + std::rand() % (max - min + 1);
+}
+
+const char* Utils::get_mode_name(ParallelMode mode) {
+    switch (mode) {
+        case ParallelMode::SEQUENTIAL: return "Sequential";
+        case ParallelMode::MULTITHREADED: return "Multithreaded (OpenMP)";
+        case ParallelMode::MPI: return "MPI";
+        case ParallelMode::GPU_SIMPLE: return "GPU Simple";
+        case ParallelMode::GPU_COMPLEX: return "GPU Complex";
+        default: return "Unknown";
     }
 }
