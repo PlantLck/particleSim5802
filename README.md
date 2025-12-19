@@ -8,35 +8,13 @@
 
 This project implements a real-time particle physics simulation featuring five distinct parallelization approaches, designed to explore the performance characteristics and practical limitations of different parallel computing paradigms on embedded hardware. The simulation visualizes thousands of particles interacting through elastic collisions, wall constraints, friction, and user-controlled forces, with the unique capability to switch between parallelization modes at runtime for direct performance comparison.
 
-Rather than solely pursuing maximum particle counts, this project investigates how different parallelization strategies behave under real hardware constraints and identifies where theoretical improvements fail to translate into practical performance gains on edge devices.
-
 ## Key Features
 
-- **Five Parallelization Modes**: Sequential baseline, multithreaded (OpenMP), distributed (MPI), basic GPU (CUDA), and optimized GPU with advanced techniques
+- **Five Parallelization Modes**: Sequential baseline, multithreaded (OpenMP), distributed (MPI), basic GPU (CUDA), and optimized GPU with spatial grid
 - **Real-Time Mode Switching**: Compare performance characteristics without restarting the application
 - **Comprehensive Performance Metrics**: Live FPS, physics timing, render timing, temperature, and power consumption
-- **Interactive Controls**: Dynamic particle spawning, force application, and parameter adjustment
+- **Interactive Controls**: Dynamic particle spawning, adjustable force magnitude, and intuitive mouse interaction
 - **Spatial Partitioning**: O(n) collision detection using optimized spatial grid implementation
-- **Educational Focus**: Clear code demonstrating fundamental parallel computing concepts
-
-## System Architecture
-
-### Parallelization Modes
-
-#### Mode 1: Sequential (Baseline)
-Single-threaded implementation serving as the reference point for correctness and performance comparison. Processes particles sequentially with straightforward collision detection.
-
-#### Mode 2: Multithreaded (OpenMP)
-Shared-memory parallelization using OpenMP directives to distribute work across CPU cores. Features parallel spatial grid construction and optimized scheduling strategies.
-
-#### Mode 3: Distributed (MPI)
-Message-passing parallelization decomposing particles across multiple processes with explicit synchronization through gather and broadcast operations.
-
-#### Mode 4: GPU Simple (CUDA)
-Basic GPU implementation representing a direct algorithm port to CUDA. Uses brute-force O(n²) collision detection to isolate the effect of GPU parallelism.
-
-#### Mode 5: GPU Complex (Optimized CUDA)
-Advanced GPU implementation featuring spatial grid construction entirely on GPU, shared memory caching, coalesced memory access patterns, and algorithmic optimizations for embedded GPU architectures.
 
 ## System Requirements
 
@@ -105,8 +83,9 @@ ParticleSimulation/
 **Particle Control**:
 - `+`/`=` - Add 50 particles
 - `-` - Remove 50 particles
-- Left Mouse Button - Apply attractive force
-- Right Mouse Button - Apply repulsive force
+- `Left Mouse Button` - Hold and drag to attract particles
+- `Right Mouse Button` - Hold and drag to repel particles
+- `UP`/`DOWN` arrows or `Mouse Scroll` - Adjust force magnitude
 
 **Application Control**:
 - `SPACE` - Pause/Resume simulation
@@ -128,36 +107,20 @@ mpirun -np 4 ./particle_sim_full
 
 ## Performance Characteristics
 
-Performance varies significantly based on hardware platform and parallelization mode. The following represents general scaling characteristics:
-
-**Jetson Xavier NX** (estimated targets): <- Incorrect
-- Sequential: ~800 particles @ 60 FPS
-- Multithreaded: ~3,000-4,000 particles @ 60 FPS (4-5× speedup)
-- MPI: ~2,500-3,500 particles @ 60 FPS (communication overhead)
-- GPU Simple: ~6,000 particles @ 60 FPS (brute-force on GPU)
-- GPU Complex: ~10,000-15,000 particles @ 60 FPS (spatial optimization)
+Performance varies significantly based on hardware platform and parallelization mode. The following represents general scaling characteristics observed during testing.
 
 Performance metrics are displayed in real-time during execution, allowing direct observation of parallelization effectiveness.
 
 ## Technical Highlights
 
 ### Spatial Grid Optimization
-The simulation employs a spatial partitioning grid that reduces collision detection complexity from O(n²) to O(n) by checking only particles in nearby grid cells. This optimization is critical for achieving real-time performance with thousands of particles.
+The simulation employs a spatial partitioning grid that reduces collision detection complexity from O(n²) to O(n) by checking only particles in nearby grid cells.
 
 ### GPU Memory Management
-The GPU implementation leverages CUDA unified memory on Jetson platforms to minimize explicit data transfers. The complex GPU mode constructs and queries the spatial grid entirely on the device, avoiding expensive CPU-GPU synchronization.
+The GPU implementation leverages CUDA unified memory on Jetson platforms to minimize explicit data transfers.
 
-### OpenMP Parallelization
-The multithreaded mode uses parallel regions for both spatial grid construction and collision detection, with dynamic scheduling to balance load across heterogeneous particle distributions.
-
-### MPI Communication Pattern
-The distributed mode employs optimized MPI_Allgather operations to synchronize particle state across processes, minimizing communication overhead while maintaining consistency.
-
-## Known Limitations
-
-- MPI mode requires all processes on same machine (no network distribution implemented)
-- Temperature and power monitoring only functional on Jetson platforms
-- Maximum particle count constrained by GPU memory on desktop platforms
+### Interactive Mouse Force
+The mouse force system allows click-and-drag interaction with adjustable force magnitude, providing intuitive control over particle behavior.
 
 ## Build Options
 
@@ -172,17 +135,3 @@ make clean    # Remove build artifacts
 make help     # Display all available targets
 make info     # Show build configuration
 ```
-
-## Future Enhancements
-
-Potential areas for expansion:
-
-- Additional physics interactions (gravity, spring forces, collision categories)
-- Performance profiling integration (NVIDIA Nsight, gprof)
-- Benchmark automation and results visualization
-- Hybrid parallelization (MPI + OpenMP + CUDA)
-- Compute shader implementation for comparison with CUDA
-
-## License
-
-This project is provided for educational purposes. Please refer to your institution's academic integrity policies regarding code reuse and collaboration.
