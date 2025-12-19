@@ -17,16 +17,12 @@
 #include <mpi.h>
 #endif
 
-// Compiler hints for branch prediction
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 
-// Constants
 constexpr float EPSILON = 1e-6f;
 constexpr float MAX_VELOCITY = 500.0f;
-constexpr float MOUSE_FORCE_RADIUS = 150.0f;
 
-// Force inlining for hot path functions
 #ifdef __GNUC__
 #define FORCE_INLINE __attribute__((always_inline)) inline
 #else
@@ -45,48 +41,45 @@ extern "C" {
 // ============================================================================
 
 FORCE_INLINE void apply_mouse_force_optimized(Particle& p, int mx, int my, 
-                                               float force_magnitude, bool attract) {
-    float dx = mx - p.x;
-    float dy = my - p.y;
+                                               float force_magnitude, bool attract,
+                                               float max_radius, float dt) {
+    float dx = static_cast<float>(mx) - p.x;
+    float dy = static_cast<float>(my) - p.y;
     float dist_sq = dx * dx + dy * dy;
-    float max_dist_sq = MOUSE_FORCE_RADIUS * MOUSE_FORCE_RADIUS;
+    float max_dist_sq = max_radius * max_radius;
     
     if (dist_sq > max_dist_sq || dist_sq < EPSILON) return;
     
     float dist = sqrtf(dist_sq);
-    float force = force_magnitude * (1.0f - dist / MOUSE_FORCE_RADIUS);
+    float normalized_dist = dist / max_radius;
+    float force = force_magnitude * (1.0f - normalized_dist * normalized_dist);
     
     if (!attract) force = -force;
     
-    float fx = (dx / dist) * force;
-    float fy = (dy / dist) * force;
+    float inv_dist = 1.0f / dist;
+    float fx = dx * inv_dist * force;
+    float fy = dy * inv_dist * force;
     
-    p.vx += fx / p.mass;
-    p.vy += fy / p.mass;
+    p.vx += fx * dt / p.mass;
+    p.vy += fy * dt / p.mass;
 }
 
 FORCE_INLINE void resolve_wall_collision_optimized(Particle& p, float restitution,
                                                     int window_width, int window_height) {
-    bool collided = false;
-    
     if (p.x - p.radius < 0.0f) {
         p.x = p.radius;
         p.vx = fabsf(p.vx) * restitution;
-        collided = true;
     } else if (p.x + p.radius > window_width) {
         p.x = window_width - p.radius;
         p.vx = -fabsf(p.vx) * restitution;
-        collided = true;
     }
     
     if (p.y - p.radius < 0.0f) {
         p.y = p.radius;
         p.vy = fabsf(p.vy) * restitution;
-        collided = true;
     } else if (p.y + p.radius > window_height) {
         p.y = window_height - p.radius;
         p.vy = -fabsf(p.vy) * restitution;
-        collided = true;
     }
 }
 
@@ -122,7 +115,6 @@ FORCE_INLINE bool resolve_particle_collision_optimized(Particle& p1, Particle& p
     if (LIKELY(dist_sq >= min_dist_sq)) return false;
     if (UNLIKELY(dist_sq < EPSILON)) return false;
     
-    // Check if particles are already separating
     float dvx = p2.vx - p1.vx;
     float dvy = p2.vy - p1.vy;
     float relative_velocity = dvx * dx + dvy * dy;
@@ -130,7 +122,6 @@ FORCE_INLINE bool resolve_particle_collision_optimized(Particle& p1, Particle& p
     
     float dist = sqrtf(dist_sq);
     
-    // Separate overlapping particles
     float overlap = min_dist - dist;
     float total_mass = p1.mass + p2.mass;
     float ratio1 = p2.mass / total_mass;
@@ -144,7 +135,6 @@ FORCE_INLINE bool resolve_particle_collision_optimized(Particle& p1, Particle& p
     p2.x += sep_x * ratio2;
     p2.y += sep_y * ratio2;
     
-    // Calculate collision impulse
     float nx = dx / dist;
     float ny = dy / dist;
     
@@ -183,9 +173,8 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
     int mouse_y = sim.get_mouse_y();
     bool mouse_attract = sim.is_mouse_attract();
     float mouse_force = sim.get_mouse_force();
+    float mouse_radius = sim.get_mouse_force_radius();
     
-    // Phase 1: Position updates
-    #pragma GCC ivdep
     for (int i = 0; i < count; i++) {
         Particle& p = particles[i];
         
@@ -195,11 +184,10 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
             apply_friction_optimized(p, friction);
         }
         
-        if (UNLIKELY(mouse_pressed)) {
-            apply_mouse_force_optimized(p, mouse_x, mouse_y, mouse_force, mouse_attract);
+        if (mouse_pressed) {
+            apply_mouse_force_optimized(p, mouse_x, mouse_y, mouse_force, mouse_attract, mouse_radius, dt);
         }
         
-        // Euler integration
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         
@@ -207,10 +195,8 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
         limit_velocity_optimized(p, MAX_VELOCITY);
     }
     
-    // Update spatial grid
     grid.update(particles);
     
-    // Phase 2: Collision detection using spatial grid
     std::vector<int> nearby;
     nearby.reserve(64);
     
@@ -240,7 +226,6 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
 
 #ifdef _OPENMP
 
-// Parallel prefix sum for grid construction
 void parallel_prefix_sum(const int* input, int* output, int size) {
     output[0] = 0;
     for (int i = 1; i < size; i++) {
@@ -248,7 +233,6 @@ void parallel_prefix_sum(const int* input, int* output, int size) {
     }
 }
 
-// Parallel grid update using thread-local counting
 void update_grid_parallel(SpatialGrid& grid, std::vector<Particle>& particles) {
     int particle_count = particles.size();
     int num_cells = grid.get_cell_count();
@@ -262,13 +246,11 @@ void update_grid_parallel(SpatialGrid& grid, std::vector<Particle>& particles) {
         num_threads = omp_get_num_threads();
     }
     
-    // Thread-local cell counts
     std::vector<std::vector<int>> thread_cell_counts(num_threads);
     for (auto& counts : thread_cell_counts) {
         counts.resize(num_cells, 0);
     }
     
-    // Phase 1: Parallel counting
     #pragma omp parallel
     {
         int tid = omp_get_thread_num();
@@ -285,7 +267,6 @@ void update_grid_parallel(SpatialGrid& grid, std::vector<Particle>& particles) {
         }
     }
     
-    // Phase 2: Reduce thread-local counts
     for (int cell = 0; cell < num_cells; cell++) {
         int total = 0;
         for (int tid = 0; tid < num_threads; tid++) {
@@ -294,11 +275,9 @@ void update_grid_parallel(SpatialGrid& grid, std::vector<Particle>& particles) {
         cell_counts[cell] = total;
     }
     
-    // Phase 3: Prefix sum
     auto& cell_starts = grid.get_cell_starts();
     parallel_prefix_sum(cell_counts.data(), cell_starts.data(), num_cells);
     
-    // Phase 4: Fill particle indices
     std::vector<std::vector<int>> thread_positions(num_threads);
     for (auto& pos : thread_positions) {
         pos.resize(num_cells, 0);
@@ -333,7 +312,6 @@ void update_grid_parallel(SpatialGrid& grid, std::vector<Particle>& particles) {
     }
 }
 
-// Collision pair structure for deferred resolution
 struct CollisionPair {
     int p1_idx;
     int p2_idx;
@@ -357,15 +335,13 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
     int mouse_y = sim.get_mouse_y();
     bool mouse_attract = sim.is_mouse_attract();
     float mouse_force = sim.get_mouse_force();
+    float mouse_radius = sim.get_mouse_force_radius();
     
-    // Persistent parallel region to eliminate fork-join overhead
     #pragma omp parallel
     {
-        // Thread-local collision storage
         std::vector<CollisionPair> local_collisions;
         local_collisions.reserve(count / omp_get_num_threads());
         
-        // Phase 1: Position updates
         #pragma omp for schedule(static)
         for (int i = 0; i < count; i++) {
             Particle& p = particles[i];
@@ -377,7 +353,7 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
             }
             
             if (mouse_pressed) {
-                apply_mouse_force_optimized(p, mouse_x, mouse_y, mouse_force, mouse_attract);
+                apply_mouse_force_optimized(p, mouse_x, mouse_y, mouse_force, mouse_attract, mouse_radius, dt);
             }
             
             p.x += p.vx * dt;
@@ -394,7 +370,6 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
         }
         #pragma omp barrier
         
-        // Phase 2: Collision detection
         std::vector<int> nearby;
         nearby.reserve(64);
         
@@ -456,7 +431,6 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
         
         #pragma omp barrier
         
-        // Phase 3: Apply collision impulses
         #pragma omp for schedule(static)
         for (int i = 0; i < count; i++) {
             for (int tid = 0; tid < omp_get_num_threads(); tid++) {
@@ -490,16 +464,13 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
 
 #ifdef USE_MPI
 
-// Minimal structure for MPI communication
-struct ParticlePhysics {
+struct ParticleData {
     float x, y;
     float vx, vy;
-};
-
-struct MouseState {
-    int x, y;
-    int pressed;
-    int attract;
+    float radius;
+    float mass;
+    uint8_t r, g, b;
+    bool active;
 };
 
 void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
@@ -516,19 +487,31 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
     int window_height = sim.get_window_height();
     float friction = sim.get_friction();
     float restitution = sim.get_restitution();
+    float mouse_force = sim.get_mouse_force();
+    float mouse_radius = sim.get_mouse_force_radius();
     
-    int local_count = count / size;
-    int start_idx = rank * local_count;
-    int end_idx = (rank == size - 1) ? count : (rank + 1) * local_count;
+    int base_count = count / size;
+    int remainder = count % size;
     
-    // Register MPI datatype
-    static MPI_Datatype MPI_PARTICLE_PHYSICS = MPI_DATATYPE_NULL;
-    if (MPI_PARTICLE_PHYSICS == MPI_DATATYPE_NULL) {
-        MPI_Type_contiguous(4, MPI_FLOAT, &MPI_PARTICLE_PHYSICS);
-        MPI_Type_commit(&MPI_PARTICLE_PHYSICS);
+    std::vector<int> counts(size);
+    std::vector<int> displs(size);
+    int offset = 0;
+    for (int i = 0; i < size; i++) {
+        counts[i] = base_count + (i < remainder ? 1 : 0);
+        displs[i] = offset;
+        offset += counts[i];
     }
     
-    // Broadcast mouse state
+    int local_start = displs[rank];
+    int local_count = counts[rank];
+    int local_end = local_start + local_count;
+    
+    struct MouseState {
+        int x, y;
+        int pressed;
+        int attract;
+    };
+    
     MouseState mouse;
     if (rank == 0) {
         mouse.x = sim.get_mouse_x();
@@ -538,8 +521,7 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
     }
     MPI_Bcast(&mouse, sizeof(MouseState), MPI_BYTE, 0, MPI_COMM_WORLD);
     
-    // Update local particles
-    for (int i = start_idx; i < end_idx; i++) {
+    for (int i = local_start; i < local_end; i++) {
         Particle& p = particles[i];
         if (!p.active) continue;
         
@@ -548,8 +530,8 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
         }
         
         if (mouse.pressed) {
-            apply_mouse_force_optimized(p, mouse.x, mouse.y, sim.get_mouse_force(), 
-                                       mouse.attract != 0);
+            apply_mouse_force_optimized(p, mouse.x, mouse.y, mouse_force, 
+                                       mouse.attract != 0, mouse_radius, dt);
         }
         
         p.x += p.vx * dt;
@@ -559,32 +541,40 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
         limit_velocity_optimized(p, MAX_VELOCITY);
     }
     
-    // Gather all particle positions
-    std::vector<ParticlePhysics> physics_data(count);
-    for (int i = start_idx; i < end_idx; i++) {
-        physics_data[i].x = particles[i].x;
-        physics_data[i].y = particles[i].y;
-        physics_data[i].vx = particles[i].vx;
-        physics_data[i].vy = particles[i].vy;
+    std::vector<float> local_data(local_count * 4);
+    for (int i = 0; i < local_count; i++) {
+        int idx = local_start + i;
+        local_data[i * 4 + 0] = particles[idx].x;
+        local_data[i * 4 + 1] = particles[idx].y;
+        local_data[i * 4 + 2] = particles[idx].vx;
+        local_data[i * 4 + 3] = particles[idx].vy;
     }
     
-    MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
-                  physics_data.data(), local_count, MPI_PARTICLE_PHYSICS,
-                  MPI_COMM_WORLD);
+    std::vector<float> all_data(count * 4);
+    std::vector<int> recv_counts(size);
+    std::vector<int> recv_displs(size);
+    for (int i = 0; i < size; i++) {
+        recv_counts[i] = counts[i] * 4;
+        recv_displs[i] = displs[i] * 4;
+    }
+    
+    MPI_Allgatherv(local_data.data(), local_count * 4, MPI_FLOAT,
+                   all_data.data(), recv_counts.data(), recv_displs.data(),
+                   MPI_FLOAT, MPI_COMM_WORLD);
     
     for (int i = 0; i < count; i++) {
-        particles[i].x = physics_data[i].x;
-        particles[i].y = physics_data[i].y;
+        particles[i].x = all_data[i * 4 + 0];
+        particles[i].y = all_data[i * 4 + 1];
+        particles[i].vx = all_data[i * 4 + 2];
+        particles[i].vy = all_data[i * 4 + 3];
     }
     
-    // Update grid on all ranks
     grid.update(particles);
     
-    // Local collision detection
     std::vector<int> nearby;
     nearby.reserve(64);
     
-    for (int i = start_idx; i < end_idx; i++) {
+    for (int i = local_start; i < local_end; i++) {
         Particle& p1 = particles[i];
         if (!p1.active) continue;
         
@@ -600,19 +590,23 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
         }
     }
     
-    // Gather collision results
-    for (int i = start_idx; i < end_idx; i++) {
-        physics_data[i].vx = particles[i].vx;
-        physics_data[i].vy = particles[i].vy;
+    for (int i = 0; i < local_count; i++) {
+        int idx = local_start + i;
+        local_data[i * 4 + 0] = particles[idx].x;
+        local_data[i * 4 + 1] = particles[idx].y;
+        local_data[i * 4 + 2] = particles[idx].vx;
+        local_data[i * 4 + 3] = particles[idx].vy;
     }
     
-    MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL,
-                  physics_data.data(), local_count, MPI_PARTICLE_PHYSICS,
-                  MPI_COMM_WORLD);
+    MPI_Allgatherv(local_data.data(), local_count * 4, MPI_FLOAT,
+                   all_data.data(), recv_counts.data(), recv_displs.data(),
+                   MPI_FLOAT, MPI_COMM_WORLD);
     
     for (int i = 0; i < count; i++) {
-        particles[i].vx = physics_data[i].vx;
-        particles[i].vy = physics_data[i].vy;
+        particles[i].x = all_data[i * 4 + 0];
+        particles[i].y = all_data[i * 4 + 1];
+        particles[i].vx = all_data[i * 4 + 2];
+        particles[i].vy = all_data[i * 4 + 3];
     }
     
     double end_time = Utils::get_time_ms();
