@@ -12,10 +12,6 @@
 #include <cstdio>
 #include <cmath>
 
-// ============================================================================
-// Graphics Implementation
-// ============================================================================
-
 class Graphics {
 private:
     SDL_Window* window;
@@ -24,11 +20,9 @@ private:
     bool show_menu;
     bool show_stats;
     
-    // Pre-rendered particle texture for performance
     SDL_Texture* particle_texture;
     int cached_particle_radius;
     
-    // Create reusable particle texture with color modulation
     SDL_Texture* create_particle_texture(int radius) {
         SDL_Texture* tex = SDL_CreateTexture(
             renderer,
@@ -43,12 +37,10 @@ private:
             return nullptr;
         }
         
-        // Render to texture
         SDL_SetRenderTarget(renderer, tex);
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
         SDL_RenderClear(renderer);
         
-        // Draw white filled circle
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         draw_filled_circle_fast(radius + 1, radius + 1, radius);
         
@@ -61,7 +53,6 @@ private:
         return tex;
     }
     
-    // Bresenham circle algorithm with 8-way symmetry
     void draw_filled_circle_fast(int cx, int cy, int radius) {
         if (radius <= 0) return;
         
@@ -93,17 +84,6 @@ private:
                 draw_hline(cx - x, cx + x, cy - y);
                 draw_hline(cx - y, cx + y, cy + x);
                 draw_hline(cx - y, cx + y, cy - x);
-            }
-        }
-    }
-    
-    // Legacy fallback for compatibility
-    void draw_filled_circle(int cx, int cy, int radius) {
-        for (int y = -radius; y <= radius; y++) {
-            for (int x = -radius; x <= radius; x++) {
-                if (x * x + y * y <= radius * radius) {
-                    SDL_RenderDrawPoint(renderer, cx + x, cy + y);
-                }
             }
         }
     }
@@ -150,13 +130,14 @@ public:
             return false;
         }
         
-        // Try to load font from common system locations
         const char* font_paths[] = {
             "C:/Windows/Fonts/arial.ttf",
             "C:/Windows/Fonts/calibri.ttf",
             "C:/Windows/Fonts/segoeui.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
             nullptr
         };
 
@@ -173,7 +154,6 @@ public:
             fprintf(stderr, "Text rendering will not be available.\n");
         }
         
-        // Create particle texture
         particle_texture = create_particle_texture(static_cast<int>(DEFAULT_PARTICLE_RADIUS));
         cached_particle_radius = static_cast<int>(DEFAULT_PARTICLE_RADIUS);
         
@@ -231,7 +211,6 @@ public:
         
         const auto& particles = sim.get_particles();
         
-        // Recreate texture if particle size changed
         if (!particles.empty() && 
             static_cast<int>(particles[0].radius) != cached_particle_radius) {
             
@@ -246,9 +225,7 @@ public:
                    cached_particle_radius);
         }
         
-        // Render particles using texture or fallback
         if (particle_texture) {
-            // Optimized: texture-based rendering with color modulation
             for (const auto& p : particles) {
                 if (!p.active) continue;
                 
@@ -264,7 +241,6 @@ public:
                 SDL_RenderCopy(renderer, particle_texture, nullptr, &dst);
             }
         } else {
-            // Fallback: Bresenham algorithm
             for (const auto& p : particles) {
                 if (!p.active) continue;
                 
@@ -282,6 +258,14 @@ public:
     void render_stats(Simulation& sim) {
         if (!show_stats) return;
         
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(renderer, 20, 20, 30, 200);
+        SDL_Rect stats_bg = {5, 5, 220, 200};
+        SDL_RenderFillRect(renderer, &stats_bg);
+        
+        SDL_SetRenderDrawColor(renderer, 80, 80, 100, 255);
+        SDL_RenderDrawRect(renderer, &stats_bg);
+        
         SDL_Color white = {255, 255, 255, 255};
         SDL_Color green = {100, 255, 100, 255};
         SDL_Color yellow = {255, 255, 100, 255};
@@ -289,65 +273,63 @@ public:
         SDL_Color cyan = {100, 255, 255, 255};
         
         const auto& metrics = sim.get_metrics();
-        int y_offset = 10;
+        int y_offset = 12;
         int line_height = 20;
+        int x_offset = 12;
         
         std::ostringstream ss;
         
-        // FPS
+        SDL_Color fps_color = green;
+        if (metrics.fps < 30.0) fps_color = red;
+        else if (metrics.fps < 55.0) fps_color = yellow;
+        
         ss << "FPS: " << std::fixed << std::setprecision(1) << metrics.fps;
-        render_text(ss.str(), 10, y_offset, green);
+        render_text(ss.str(), x_offset, y_offset, fps_color);
         y_offset += line_height;
         
-        // Particle count
         ss.str("");
         ss << "Particles: " << sim.get_particle_count();
-        render_text(ss.str(), 10, y_offset, white);
+        render_text(ss.str(), x_offset, y_offset, white);
         y_offset += line_height;
         
-        // Mode
         ss.str("");
         ss << "Mode: " << Utils::get_mode_name(sim.get_mode());
-        render_text(ss.str(), 10, y_offset, yellow);
+        render_text(ss.str(), x_offset, y_offset, yellow);
         y_offset += line_height;
         
-        // Physics time
         ss.str("");
-        ss << "Physics: " << std::fixed << std::setprecision(2) << metrics.total_physics_time_ms << " ms";
-        render_text(ss.str(), 10, y_offset, white);
+        ss << "Physics: " << std::fixed << std::setprecision(2) << metrics.physics_time_ms << " ms";
+        render_text(ss.str(), x_offset, y_offset, white);
         y_offset += line_height;
         
-        // Render time
         ss.str("");
-        ss << "Render: " << std::fixed << std::setprecision(2) << metrics.total_render_time_ms << " ms";
-        if (particle_texture) {
-            ss << " [OPT]";
-            render_text(ss.str(), 10, y_offset, cyan);
-        } else {
-            render_text(ss.str(), 10, y_offset, white);
-        }
+        ss << "Render: " << std::fixed << std::setprecision(2) << metrics.render_time_ms << " ms";
+        render_text(ss.str(), x_offset, y_offset, white);
         y_offset += line_height;
         
-        // Friction
         ss.str("");
-        ss << "Friction: " << std::fixed << std::setprecision(4) << sim.get_friction();
-        render_text(ss.str(), 10, y_offset, white);
+        ss << "Mouse Force: " << std::fixed << std::setprecision(0) << sim.get_mouse_force();
+        render_text(ss.str(), x_offset, y_offset, cyan);
         y_offset += line_height;
         
-        // Temperature with color coding
         SDL_Color temp_color = white;
         if (metrics.temperature_c > 70.0f) temp_color = red;
         else if (metrics.temperature_c > 55.0f) temp_color = yellow;
+        else if (metrics.temperature_c > 0.0f) temp_color = green;
         
         ss.str("");
         ss << "Temp: " << std::fixed << std::setprecision(1) << metrics.temperature_c << " C";
-        render_text(ss.str(), 10, y_offset, temp_color);
+        render_text(ss.str(), x_offset, y_offset, temp_color);
         y_offset += line_height;
         
-        // Power
         ss.str("");
         ss << "Power: " << std::fixed << std::setprecision(2) << metrics.power_watts << " W";
-        render_text(ss.str(), 10, y_offset, white);
+        render_text(ss.str(), x_offset, y_offset, white);
+        y_offset += line_height;
+        
+        ss.str("");
+        ss << "Friction: " << std::fixed << std::setprecision(4) << sim.get_friction();
+        render_text(ss.str(), x_offset, y_offset, white);
     }
     
     void render_menu(Simulation& sim) {
@@ -355,14 +337,17 @@ public:
         
         SDL_Color white = {255, 255, 255, 255};
         SDL_Color highlight = {100, 255, 255, 255};
+        SDL_Color dim = {180, 180, 180, 255};
         
-        // Semi-transparent background
         SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 180);
-        SDL_Rect menu_rect = {WINDOW_WIDTH - 320, 10, 310, 200};
+        SDL_SetRenderDrawColor(renderer, 20, 20, 30, 200);
+        SDL_Rect menu_rect = {WINDOW_WIDTH - 280, 10, 270, 260};
         SDL_RenderFillRect(renderer, &menu_rect);
         
-        int x = WINDOW_WIDTH - 310;
+        SDL_SetRenderDrawColor(renderer, 80, 80, 100, 255);
+        SDL_RenderDrawRect(renderer, &menu_rect);
+        
+        int x = WINDOW_WIDTH - 270;
         int y = 20;
         int line_height = 20;
         
@@ -384,22 +369,26 @@ public:
         render_text("[+/-] Add/Remove Particles", x, y, white);
         y += line_height;
         
-        render_text("[LMB] Attract", x, y, white);
+        render_text("[UP/DOWN] Adjust Force", x, y, white);
         y += line_height;
         
-        render_text("[RMB] Repel", x, y, white);
+        render_text("[Scroll] Adjust Force", x, y, white);
+        y += line_height;
+        
+        render_text("[LMB] Attract (hold+drag)", x, y, white);
+        y += line_height;
+        
+        render_text("[RMB] Repel (hold+drag)", x, y, white);
         y += line_height + 5;
         
-        // Status
         std::ostringstream ss;
         ss << "Status: " << (sim.is_running() ? "Running" : "Paused");
-        render_text(ss.str(), x, y, sim.is_running() ? highlight : white);
+        render_text(ss.str(), x, y, sim.is_running() ? highlight : dim);
         y += line_height;
         
-        // Rendering mode
         ss.str("");
         ss << "Rendering: " << (particle_texture ? "Optimized" : "Fallback");
-        render_text(ss.str(), x, y, particle_texture ? highlight : white);
+        render_text(ss.str(), x, y, particle_texture ? highlight : dim);
     }
     
     void present() {
@@ -409,10 +398,6 @@ public:
     void toggle_menu() { show_menu = !show_menu; }
     void toggle_stats() { show_stats = !show_stats; }
 };
-
-// ============================================================================
-// Global Graphics Instance
-// ============================================================================
 
 static std::unique_ptr<Graphics> g_graphics;
 
