@@ -58,6 +58,7 @@
 #include <chrono>
 #include <algorithm>
 #define MAX_VELOCITY 1000.0f
+#define SHARED_PARTICLE_BUFFER_SIZE 256
 
 
 // ============================================================================
@@ -286,7 +287,7 @@ __global__ void count_particles_per_cell_optimized(
     int num_cells) {
     
     // Shared memory for per-block counting (100× faster than global atomics)
-    __shared__ int local_counts[NUM_CELLS];
+    extern __shared__ int local_counts[];
     
     // Initialize shared memory
     for (int i = threadIdx.x; i < num_cells; i += blockDim.x) {
@@ -451,8 +452,8 @@ __global__ void detect_collisions_optimized(
     int* grid_counts,
     int count) {
     
-    // Load particles into shared memory
-    __shared__ Particle shared_particles[256];
+    // Load particles into shared memory - use extern for dynamic allocation
+    extern __shared__ Particle shared_particles[];
     
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int tid = threadIdx.x;
@@ -566,7 +567,8 @@ void init_gpu_memory_optimized(int max_particles) {
     printf("  ✓ Shared memory collision detection\n");
 }
 
-void cleanup_gpu_memory() {
+// Add extern "C" linkage for C++ compatibility
+extern "C" void cleanup_gpu_memory() {
     if (gpu_initialized) {
         cudaFree(d_particles);
         cudaFree(d_particles_sorted);
@@ -609,10 +611,6 @@ void update_constants_if_needed(const Simulation* sim, bool verbose) {
         }
     }
 }
-
-// ============================================================================
-// MAIN PHYSICS UPDATE FUNCTION - FULLY OPTIMIZED
-// ============================================================================
 
 // ============================================================================
 // SIMPLE KERNELS - NO SPATIAL GRID OPTIMIZATION
@@ -820,7 +818,8 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     CUDA_CHECK(cudaMemset(d_grid_counts, 0, NUM_CELLS * sizeof(int)));
     
     // Phase 1: Per-block counting in shared memory
-    count_particles_per_cell_optimized<<<blocks, threads>>>(
+    int shared_mem_size = NUM_CELLS * sizeof(int);
+    count_particles_per_cell_optimized<<<blocks, threads, shared_mem_size>>>(
         d_particles, count, d_block_counts, NUM_CELLS);
     CUDA_CHECK(cudaGetLastError());
     
@@ -890,7 +889,8 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     CudaTimer timer_collision;
     timer_collision.begin();
     
-    detect_collisions_optimized<<<blocks, threads>>>(
+    int collision_shared_mem = threads * sizeof(Particle);
+    detect_collisions_optimized<<<blocks, threads, collision_shared_mem>>>(
         d_particles_sorted, d_grid_indices, d_grid_starts, d_grid_counts, count);
     CUDA_CHECK(cudaGetLastError());
     
