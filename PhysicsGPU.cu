@@ -845,8 +845,9 @@ extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     parallel_prefix_sum_gpu_only(d_grid_starts, NUM_CELLS);
     
     // Restore original counts (they were modified by fill_particle_indices)
-    CUDA_CHECK(cudaMemcpy(d_grid_counts, d_block_counts, blocks * NUM_CELLS * sizeof(int),
-                         cudaMemcpyDeviceToDevice));
+    reduce_block_counts_kernel<<<reduce_blocks, threads>>>(
+        d_block_counts, d_grid_counts, blocks, NUM_CELLS);
+    CUDA_CHECK(cudaGetLastError());
     reduce_block_counts_kernel<<<reduce_blocks, threads>>>(
         d_block_counts, d_grid_counts, blocks, NUM_CELLS);
     
