@@ -68,9 +68,9 @@ public:
     static void handle_mouse(const SDL_MouseButtonEvent& event, Simulation& sim) {
         if (event.type == SDL_MOUSEBUTTONDOWN) {
             bool attract = (event.button == SDL_BUTTON_LEFT);
-            sim.set_mouse_force(event.x, event.y, true, attract);
+            sim.set_mouse_state(event.x, event.y, true, attract);  // Changed
         } else if (event.type == SDL_MOUSEBUTTONUP) {
-            sim.set_mouse_force(0, 0, false, false);
+            sim.set_mouse_state(0, 0, false, false);  // Changed
         }
     }
 };
