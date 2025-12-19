@@ -1,177 +1,188 @@
-# Parallel Particle Simulation
+# Parallel Particle Simulation on Edge Devices
 
-A high-performance 2D particle physics simulation demonstrating five different parallelization approaches on NVIDIA Jetson embedded systems.
+**Author**: Max Locke  
+**Course**: Introduction to Parallel Programming and Algorithms / Honors Project  
+**Platform**: NVIDIA Jetson
 
-## Quick Start
+## Overview
 
-```bash
-# Clone/download and navigate to project directory
-cd ParticleSimulation
+This project implements a real-time particle physics simulation featuring five distinct parallelization approaches, designed to explore the performance characteristics and practical limitations of different parallel computing paradigms on embedded hardware. The simulation visualizes thousands of particles interacting through elastic collisions, wall constraints, friction, and user-controlled forces, with the unique capability to switch between parallelization modes at runtime for direct performance comparison.
 
-# Automated build (detects your system and installs dependencies)
-chmod +x build.sh
-./build.sh
+Rather than solely pursuing maximum particle counts, this project investigates how different parallelization strategies behave under real hardware constraints and identifies where theoretical improvements fail to translate into practical performance gains on edge devices.
 
-# Run the simulation
-./particle_sim
+## Key Features
 
-# Try GPU acceleration (if you have CUDA)
-./particle_sim_cuda
-```
+- **Five Parallelization Modes**: Sequential baseline, multithreaded (OpenMP), distributed (MPI), basic GPU (CUDA), and optimized GPU with advanced techniques
+- **Real-Time Mode Switching**: Compare performance characteristics without restarting the application
+- **Comprehensive Performance Metrics**: Live FPS, physics timing, render timing, temperature, and power consumption
+- **Interactive Controls**: Dynamic particle spawning, force application, and parameter adjustment
+- **Spatial Partitioning**: O(n) collision detection using optimized spatial grid implementation
+- **Educational Focus**: Clear code demonstrating fundamental parallel computing concepts
 
-## What Is This?
+## System Architecture
 
-This project simulates hundreds to thousands of particles bouncing around the screen, colliding with each other and walls. It demonstrates how different parallelization techniques affect performance:
+### Parallelization Modes
 
-- **Mode 1 (Sequential)**: Traditional single-threaded execution - baseline performance
-- **Mode 2 (Multithreaded)**: Uses OpenMP to spread work across all CPU cores - 2-4x faster
-- **Mode 3 (MPI)**: Distributes work across multiple processes - useful for clusters
-- **Mode 4 (GPU Simple)**: Basic CUDA GPU acceleration - 5-10x faster
-- **Mode 5 (GPU Complex)**: Optimized GPU with shared memory - 10-20x faster
+#### Mode 1: Sequential (Baseline)
+Single-threaded implementation serving as the reference point for correctness and performance comparison. Processes particles sequentially with straightforward collision detection.
 
-Press **1-5** during runtime to switch between modes and watch performance change in real-time!
+#### Mode 2: Multithreaded (OpenMP)
+Shared-memory parallelization using OpenMP directives to distribute work across CPU cores. Features parallel spatial grid construction and optimized scheduling strategies.
 
-## Performance Expectations
+#### Mode 3: Distributed (MPI)
+Message-passing parallelization decomposing particles across multiple processes with explicit synchronization through gather and broadcast operations.
 
-| Platform | Mode | Particle Capacity @ 60 FPS | Speedup |
-|----------|------|---------------------------|---------|
-| Jetson Xavier NX | Sequential | ~800 | 1x |
-| Jetson Xavier NX | Multithreaded | ~2,000 | 2.5x |
-| Jetson Xavier NX | GPU Complex | ~10,000 | 12x |
+#### Mode 4: GPU Simple (CUDA)
+Basic GPU implementation representing a direct algorithm port to CUDA. Uses brute-force O(n²) collision detection to isolate the effect of GPU parallelism.
 
-## Controls
-
-| Key | Action |
-|-----|--------|
-| **1-5** | Switch parallelization modes |
-| **M** | Toggle control menu |
-| **Space** | Pause/Resume |
-| **R** | Reset simulation |
-| **+/-** | Add/Remove 50 particles |
-| **F/G** | Decrease/Increase friction |
-| **Left Click + Drag** | Attract particles to mouse |
-| **Right Click + Drag** | Repel particles from mouse |
-| **ESC** | Exit |
-
-## Features
-
-### Interactive Physics
-- Perfectly elastic collisions with momentum conservation
-- Adjustable friction for energy dissipation
-- Mouse interaction for real-time particle manipulation
-- Wall boundaries with collision response
-
-### Real-Time Monitoring
-- FPS (frames per second)
-- Physics computation time
-- Rendering time
-- System temperature (Jetson only)
-- Power consumption (Jetson only)
-
-### Cross-Platform Support
-- **NVIDIA Jetson**: Nano, TX2, Xavier, Orin
-- **Linux Desktop**: Any system with NVIDIA GPU
-
-## Building from Source
-
-### Linux/Jetson (Simple Method)
-```bash
-./build.sh
-```
-
-### Manual Build (All Platforms)
-```bash
-# Using CMake (cross-platform)
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_CUDA=ON
-cmake --build build --config Release
-
-# Using Make (Linux/Jetson only)
-make              # Standard build
-make mpi          # With MPI
-make cuda         # With CUDA
-make cuda_mpi     # All features
-```
+#### Mode 5: GPU Complex (Optimized CUDA)
+Advanced GPU implementation featuring spatial grid construction entirely on GPU, shared memory caching, coalesced memory access patterns, and algorithmic optimizations for embedded GPU architectures.
 
 ## System Requirements
 
-### Minimum (Jetson)
-- NVIDIA Jetson (any model)
-- 2GB RAM
-- Ubuntu 18.04+
-- GCC 7.4+
-
-### Minimum (Desktop)
-- CPU: Any modern multi-core processor
-- RAM: 4GB
-- GPU: NVIDIA GPU with CUDA support (for GPU modes)
-- OS: Linux or Windows 10/11
+### Minimum Hardware (Jetson)
+- NVIDIA Jetson (any model: Nano, TX2, Xavier NX, AGX Xavier, Orin)
+- 2GB RAM minimum (4GB+ recommended)
+- Ubuntu 18.04 or later (L4T operating system)
 
 ### Software Dependencies
-- **Required**: SDL2, SDL2_ttf, GCC/G++
-- **Optional**: CUDA Toolkit (for GPU modes), OpenMPI (for MPI mode)
 
-See [INSTALLATION.md](INSTALLATION.md) for detailed setup instructions.
+**Required**:
+- GCC 7.4+ or compatible C++17 compiler
+- SDL2 library (graphics and windowing)
+- SDL2_ttf library (text rendering)
+
+**Optional** (enables specific modes):
+- CUDA Toolkit 10.2+ (enables GPU modes 4 and 5)
+- OpenMPI 4.0+ (enables distributed mode 3)
+- OpenMP 3.0+ (typically included with GCC, enables mode 2)
+
+### Quick Start (Jetson/Linux)
+
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install -y libsdl2-dev libsdl2-ttf-dev build-essential
+
+# Build the project
+chmod +x build.sh
+./build.sh  # Interactive build script with auto-detection
+
+# Or use Make directly
+make cuda   # Recommended: builds with GPU support
+
+# Run the simulation
+./particle_sim_cuda
+```
 
 ## Project Structure
 
 ```
-.
-├── ParticleSimulation.hpp    # Main header with all classes
-├── Main.cpp                   # Application entry point
-├── Simulation.cpp             # Particle management & spatial grid
-├── Physics.cpp                # All 5 physics implementations
-├── PhysicsGPU.cu             # CUDA GPU kernels
-├── Rendering.cpp              # SDL2 graphics and UI
-├── SystemMonitor.cpp          # Platform-specific monitoring
-├── Makefile                   # Build system
-├── build.sh                   # Automated setup script
+ParticleSimulation/
+├── ParticleSimulation.hpp    # Central header with all class definitions
+├── Main.cpp                   # Application entry point and main loop
+├── Simulation.cpp             # Particle management and spatial grid implementation
+├── Physics.cpp                # All five physics mode implementations
+├── PhysicsGPU.cu             # CUDA kernels for GPU modes
+├── Rendering.cpp              # SDL2 graphics and UI overlay
+├── SystemMonitor.cpp          # Platform-specific performance monitoring
+├── Makefile                   # Build system with multiple targets
+├── build.sh                   # Interactive build script
 ├── README.md                  # This file
-├── INSTALLATION.md            # Detailed setup guide
-├── DOCUMENTATION.md           # Code architecture guide
-└── CHANGELOG.md               # Version history and status
 ```
 
-## Documentation
+## Usage
 
-- **[INSTALLATION.md](INSTALLATION.md)** - Platform-specific installation instructions
-- **[DOCUMENTATION.md](DOCUMENTATION.md)** - Architecture and implementation details
-- **[CHANGELOG.md](CHANGELOG.md)** - Project status and version history
+### Controls
 
-## Educational Value
+**Mode Selection**:
+- `1` - Sequential mode
+- `2` - Multithreaded mode (OpenMP)
+- `3` - MPI mode (requires MPI build)
+- `4` - GPU Simple mode (requires CUDA build)
+- `5` - GPU Complex mode (requires CUDA build)
 
-This project demonstrates:
-- **Parallel Computing Paradigms**: Sequential, shared-memory (OpenMP), distributed (MPI), GPU (CUDA)
-- **Performance Optimization**: Spatial partitioning, memory coalescing, shared memory caching
-- **Modern C++**: RAII, smart pointers, STL containers, move semantics
-- **Cross-Platform Development**: Platform detection, conditional compilation
-- **Real-Time Systems**: Physics engines, collision detection, frame timing
+**Particle Control**:
+- `+`/`=` - Add 50 particles
+- `-` - Remove 50 particles
+- Left Mouse Button - Apply attractive force
+- Right Mouse Button - Apply repulsive force
 
-## Key Achievements
+**Application Control**:
+- `SPACE` - Pause/Resume simulation
+- `R` - Reset simulation
+- `M` - Toggle mode selection menu
+- `ESC` - Exit application
 
-✅ 20x speedup demonstrated (GPU Complex vs Sequential)  
-✅ All 5 parallelization modes operational  
-✅ Real-time mode switching without restart  
-✅ Modern C++17 with RAII and smart pointers  
+### Running with MPI
 
-## Common Issues
+For distributed mode across multiple processes:
 
-**Q: Graphics don't display**  
-A: Install SDL2 libraries: `sudo apt-get install libsdl2-dev libsdl2-ttf-dev`
+```bash
+# Build with MPI support
+make cuda_mpi
 
-**Q: GPU modes fall back to CPU**  
-A: Install CUDA Toolkit and rebuild with `make cuda`
+# Run with 4 processes
+mpirun -np 4 ./particle_sim_full
+```
 
-**Q: Temperature/Power shows 0.0**  
-A: Normal on non-Jetson systems (Windows, generic Linux)
+## Performance Characteristics
 
-**Q: Low FPS in GPU mode**  
-A: Close background applications using GPU, check with `nvidia-smi`
+Performance varies significantly based on hardware platform and parallelization mode. The following represents general scaling characteristics:
 
-See [INSTALLATION.md](INSTALLATION.md) for more troubleshooting.
+**Jetson Xavier NX** (estimated targets): <- Incorrect
+- Sequential: ~800 particles @ 60 FPS
+- Multithreaded: ~3,000-4,000 particles @ 60 FPS (4-5× speedup)
+- MPI: ~2,500-3,500 particles @ 60 FPS (communication overhead)
+- GPU Simple: ~6,000 particles @ 60 FPS (brute-force on GPU)
+- GPU Complex: ~10,000-15,000 particles @ 60 FPS (spatial optimization)
 
-## Performance Tips
+Performance metrics are displayed in real-time during execution, allowing direct observation of parallelization effectiveness.
 
-1. **Jetson**: Use maximum power mode: `sudo nvpmodel -m 0 && sudo jetson_clocks`
-2. **Desktop**: Close GPU-heavy applications (browsers, games)
-3. **All Systems**: Start with fewer particles and increase gradually
-4. **Thermal**: Watch temperature - system may throttle above 80°C
+## Technical Highlights
+
+### Spatial Grid Optimization
+The simulation employs a spatial partitioning grid that reduces collision detection complexity from O(n²) to O(n) by checking only particles in nearby grid cells. This optimization is critical for achieving real-time performance with thousands of particles.
+
+### GPU Memory Management
+The GPU implementation leverages CUDA unified memory on Jetson platforms to minimize explicit data transfers. The complex GPU mode constructs and queries the spatial grid entirely on the device, avoiding expensive CPU-GPU synchronization.
+
+### OpenMP Parallelization
+The multithreaded mode uses parallel regions for both spatial grid construction and collision detection, with dynamic scheduling to balance load across heterogeneous particle distributions.
+
+### MPI Communication Pattern
+The distributed mode employs optimized MPI_Allgather operations to synchronize particle state across processes, minimizing communication overhead while maintaining consistency.
+
+## Known Limitations
+
+- MPI mode requires all processes on same machine (no network distribution implemented)
+- Temperature and power monitoring only functional on Jetson platforms
+- Maximum particle count constrained by GPU memory on desktop platforms
+
+## Build Options
+
+The Makefile provides multiple build targets:
+
+```bash
+make          # Standard: Sequential + OpenMP
+make mpi      # Add MPI support
+make cuda     # Add GPU support (recommended)
+make cuda_mpi # Full build with all features
+make clean    # Remove build artifacts
+make help     # Display all available targets
+make info     # Show build configuration
+```
+
+## Future Enhancements
+
+Potential areas for expansion:
+
+- Additional physics interactions (gravity, spring forces, collision categories)
+- Performance profiling integration (NVIDIA Nsight, gprof)
+- Benchmark automation and results visualization
+- Hybrid parallelization (MPI + OpenMP + CUDA)
+- Compute shader implementation for comparison with CUDA
+
+## License
+
+This project is provided for educational purposes. Please refer to your institution's academic integrity policies regarding code reuse and collaboration.
