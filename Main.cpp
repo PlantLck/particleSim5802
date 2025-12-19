@@ -68,9 +68,9 @@ public:
     static void handle_mouse(const SDL_MouseButtonEvent& event, Simulation& sim) {
         if (event.type == SDL_MOUSEBUTTONDOWN) {
             bool attract = (event.button == SDL_BUTTON_LEFT);
-            sim.set_mouse_state(event.x, event.y, true, attract);  // Changed
+            sim.set_mouse_state(event.x, event.y, true, attract);
         } else if (event.type == SDL_MOUSEBUTTONUP) {
-            sim.set_mouse_state(0, 0, false, false);  // Changed
+            sim.set_mouse_state(0, 0, false, false);
         }
     }
 };
@@ -136,7 +136,7 @@ int main(int argc, char* argv[]) {
             }
             
             Application app(DEFAULT_PARTICLE_COUNT);
-            app.run();
+            (void)app.run();  // Explicitly ignore return value to suppress warning
             cleanup_graphics();
             
 #ifdef USE_MPI
