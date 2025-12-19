@@ -57,6 +57,8 @@
 #include <vector>
 #include <chrono>
 #include <algorithm>
+#define MAX_VELOCITY 1000.0f
+
 
 // ============================================================================
 // UTILITY MACROS AND TIMER
