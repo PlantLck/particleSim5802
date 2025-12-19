@@ -1,6 +1,5 @@
 # Makefile for Parallel Particle Simulation (C++ Version)
 # Linux and NVIDIA Jetson platforms only
-# Supports: Standard build, MPI, CUDA
 
 # ============================================================================
 # Compiler Configuration
@@ -10,16 +9,14 @@ CXX := g++
 NVCC := nvcc
 MPICC := mpic++
 
-# C++ standard and optimization
 CXXFLAGS := -std=c++14 -Wall -O3 -march=native
 NVCCFLAGS := -std=c++14 -O3 --expt-relaxed-constexpr
 
-# Platform detection and configuration
+# Platform detection
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
     PLATFORM := linux
     
-    # Check for Jetson
     ifneq (,$(wildcard /etc/nv_tegra_release))
         PLATFORM := jetson
         $(info Detected: NVIDIA Jetson platform)
@@ -27,45 +24,37 @@ ifeq ($(UNAME_S),Linux)
         $(info Detected: Linux platform)
     endif
     
-    # SDL2 configuration using pkg-config
     SDL_CFLAGS := $(shell sdl2-config --cflags)
     SDL_LIBS := $(shell sdl2-config --libs) -lSDL2_ttf
 else
     $(error Unsupported platform: $(UNAME_S). This project requires Linux or Jetson.)
 endif
 
-# OpenMP support (enabled by default)
 OPENMP_FLAGS := -fopenmp
 
-# CUDA architecture detection - IMPROVED
+# CUDA architecture detection
 ifeq ($(PLATFORM),jetson)
-    # Try to detect specific Jetson model
     JETSON_MODEL := $(shell cat /etc/nv_tegra_release 2>/dev/null | grep -oP '(?<=R)[0-9]+' | head -1)
     
     ifeq ($(JETSON_MODEL),32)
-        # Jetson Nano, TX1, TX2 (Maxwell/Pascal)
         CUDA_ARCH := -arch=sm_53
         CXXFLAGS += -DJETSON_NANO -DPLATFORM_JETSON
         $(info Detected: Jetson Nano/TX series - Using sm_53)
     else ifeq ($(JETSON_MODEL),35)
-        # Jetson Orin
         CUDA_ARCH := -arch=sm_87
         CXXFLAGS += -DPLATFORM_JETSON
         $(info Detected: Jetson Orin series - Using sm_87)
     else
-        # Default to Xavier (most common modern Jetson)
         CUDA_ARCH := -arch=sm_72
         CXXFLAGS += -DPLATFORM_JETSON
         $(info Detected: Jetson Xavier series - Using sm_72)
     endif
 else
-    # Desktop GPU - use common architecture
     CUDA_ARCH := -arch=sm_86
     CXXFLAGS += -DPLATFORM_LINUX
     $(info Using desktop GPU architecture: sm_86 (adjust if needed))
 endif
 
-# Allow manual override
 ifdef CUDA_ARCH_OVERRIDE
     CUDA_ARCH := $(CUDA_ARCH_OVERRIDE)
     $(info Manual CUDA architecture override: $(CUDA_ARCH))
@@ -85,7 +74,6 @@ CUDA_OBJECT := PhysicsGPU.o
 # Build Targets
 # ============================================================================
 
-# Default target: Standard build with Sequential + OpenMP
 .PHONY: all
 all: particle_sim
 
@@ -96,7 +84,6 @@ particle_sim: $(OBJECTS)
 	@echo "  Modes available: Sequential (1), Multithreaded (2)"
 	@echo ""
 
-# MPI build: Sequential + OpenMP + MPI
 .PHONY: mpi
 mpi: CXX := $(MPICC)
 mpi: CXXFLAGS += -DUSE_MPI
@@ -110,7 +97,6 @@ particle_sim_mpi: $(OBJECTS)
 	@echo "  Modes available: Sequential (1), Multithreaded (2), MPI (3)"
 	@echo ""
 
-# CUDA build: All modes including GPU
 .PHONY: cuda
 cuda: CXXFLAGS += -DUSE_CUDA
 cuda: particle_sim_cuda
@@ -123,7 +109,6 @@ particle_sim_cuda: $(OBJECTS) $(CUDA_OBJECT)
 	@echo "  GPU Architecture: $(CUDA_ARCH)"
 	@echo ""
 
-# CUDA + MPI build: All modes
 .PHONY: cuda_mpi
 cuda_mpi: CXX := $(MPICC)
 cuda_mpi: CXXFLAGS += -DUSE_CUDA -DUSE_MPI
@@ -184,10 +169,6 @@ test: all
 	@echo "  (Launch simulation - press ESC to exit)"
 	@timeout 5 ./particle_sim || true
 	@echo "✓ Test complete"
-
-# ============================================================================
-# Information Target
-# ============================================================================
 
 .PHONY: info
 info:
@@ -278,7 +259,7 @@ profile: all
 	@echo "✓ Profile build complete (use gprof for analysis)"
 
 # ============================================================================
-# Installation Target (Optional)
+# Installation Target
 # ============================================================================
 
 PREFIX ?= /usr/local
@@ -310,26 +291,3 @@ docs:
 	@echo "  JETSON_INSTALLATION.md - Complete Jetson setup guide"
 	@echo "  DOCUMENTATION.md    - Technical architecture"
 	@echo "  CHANGELOG.md        - Version history"
-
-# ============================================================================
-# Notes
-# ============================================================================
-
-# Architecture Reference:
-# - sm_53: Jetson Nano, TX1, TX2
-# - sm_62: Jetson TX2
-# - sm_72: Jetson Xavier NX, AGX Xavier
-# - sm_75: Turing (GTX 16xx, RTX 20xx)
-# - sm_86: Ampere (RTX 30xx, A100)
-# - sm_87: Jetson Orin
-# - sm_89: Ada Lovelace (RTX 40xx)
-
-# To override CUDA architecture:
-#   make cuda CUDA_ARCH_OVERRIDE="-arch=sm_53"
-
-# For verbose compilation:
-#   make V=1
-
-# Platform-specific notes:
-# - Jetson: Unified memory architecture, optimize for thermal constraints
-# - Linux Desktop: Discrete GPU, ensure proper cooling
