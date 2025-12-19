@@ -35,8 +35,8 @@ constexpr float MOUSE_FORCE_RADIUS = 150.0f;
 
 #ifdef USE_CUDA
 extern "C" {
-    void update_physics_gpu_simple_cuda(void* sim, float dt);
-    void update_physics_gpu_complex_cuda(void* sim, float dt);
+    void update_physics_gpu_simple_cuda(Simulation* sim, float dt);
+    void update_physics_gpu_complex_cuda(Simulation* sim, float dt);
 }
 #endif
 
@@ -211,11 +211,15 @@ void PhysicsEngine::update_sequential(Simulation& sim, float dt) {
     grid.update(particles);
     
     // Phase 2: Collision detection using spatial grid
+    std::vector<int> nearby;
+    nearby.reserve(64);
+    
     for (int i = 0; i < count; i++) {
         Particle& p1 = particles[i];
         if (!p1.active) continue;
         
-        auto nearby = grid.get_nearby_particles(p1.x, p1.y, particles);
+        nearby.clear();
+        grid.get_nearby_particles(p1.x, p1.y, p1.radius * 2.0f, nearby);
         
         for (int j : nearby) {
             if (j <= i) continue;
@@ -400,7 +404,7 @@ void PhysicsEngine::update_multithreaded(Simulation& sim, float dt) {
             if (!p1.active) continue;
             
             nearby.clear();
-            nearby = grid.get_nearby_particles(p1.x, p1.y, particles);
+            grid.get_nearby_particles(p1.x, p1.y, p1.radius * 2.0f, nearby);
             
             for (int j : nearby) {
                 if (j <= i) continue;
@@ -577,11 +581,15 @@ void PhysicsEngine::update_mpi(Simulation& sim, float dt) {
     grid.update(particles);
     
     // Local collision detection
+    std::vector<int> nearby;
+    nearby.reserve(64);
+    
     for (int i = start_idx; i < end_idx; i++) {
         Particle& p1 = particles[i];
         if (!p1.active) continue;
         
-        auto nearby = grid.get_nearby_particles(p1.x, p1.y, particles);
+        nearby.clear();
+        grid.get_nearby_particles(p1.x, p1.y, p1.radius * 2.0f, nearby);
         
         for (int j : nearby) {
             if (j <= i) continue;
