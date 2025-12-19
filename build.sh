@@ -4,7 +4,6 @@
 
 set -e
 
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,10 +15,6 @@ echo -e "${BLUE}================================================${NC}"
 echo -e "${BLUE}Parallel Particle Simulation - Build Script${NC}"
 echo -e "${BLUE}================================================${NC}"
 echo ""
-
-# ============================================================================
-# Platform Detection
-# ============================================================================
 
 echo "Detecting platform..."
 
@@ -41,10 +36,6 @@ fi
 
 echo ""
 
-# ============================================================================
-# System Information
-# ============================================================================
-
 echo -e "${CYAN}System Information:${NC}"
 if [ -f /proc/cpuinfo ]; then
     CPU_MODEL=$(grep "model name" /proc/cpuinfo | head -n1 | cut -d: -f2 | xargs)
@@ -64,16 +55,7 @@ if [ -f /proc/meminfo ]; then
     echo "  RAM: $TOTAL_RAM"
 fi
 
-if [ "$PLATFORM" = "jetson" ]; then
-    JETSON_MODEL=$(cat /etc/nv_tegra_release | grep -oP '(?<=BOARD: )[^\s]+' || echo "Unknown")
-    echo "  Jetson Model: $JETSON_MODEL"
-fi
-
 echo ""
-
-# ============================================================================
-# Compiler Checks
-# ============================================================================
 
 echo "Checking for required tools..."
 
@@ -96,10 +78,6 @@ else
 fi
 
 echo ""
-
-# ============================================================================
-# Dependency Checks
-# ============================================================================
 
 echo "Checking for SDL2 libraries..."
 
@@ -146,10 +124,6 @@ fi
 
 echo ""
 
-# ============================================================================
-# Optional Dependencies
-# ============================================================================
-
 echo "Checking for optional features..."
 
 MPI_AVAILABLE=false
@@ -168,58 +142,11 @@ if command -v nvcc &> /dev/null; then
     CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | sed 's/,//')
     echo -e "${GREEN}✓ CUDA found: version $CUDA_VERSION${NC}"
     CUDA_AVAILABLE=true
-    
-    if [ "$PLATFORM" = "jetson" ]; then
-        CUDA_PATH=$(which nvcc | sed 's|/bin/nvcc||')
-        echo -e "  CUDA Path: $CUDA_PATH"
-    fi
 else
     echo -e "${YELLOW}⚠ CUDA not found - GPU modes will not be available${NC}"
-    if [ "$PLATFORM" = "jetson" ]; then
-        echo -e "${RED}  WARNING: Jetson should have CUDA pre-installed with JetPack${NC}"
-        echo -e "  Check your JetPack installation"
-    fi
-fi
-
-if echo | g++ -fopenmp -x c++ -E - &> /dev/null; then
-    echo -e "${GREEN}✓ OpenMP support detected${NC}"
-else
-    echo -e "${YELLOW}⚠ OpenMP not supported - multithreaded mode may not work${NC}"
 fi
 
 echo ""
-
-# ============================================================================
-# Jetson Performance Configuration
-# ============================================================================
-
-if [ "$PLATFORM" = "jetson" ]; then
-    echo -e "${CYAN}Jetson Performance Configuration${NC}"
-    
-    if command -v nvpmodel &> /dev/null; then
-        CURRENT_MODE=$(sudo nvpmodel -q 2>/dev/null | grep "NV Power Mode" | awk '{print $NF}')
-        echo "  Current power mode: $CURRENT_MODE"
-        
-        echo ""
-        read -p "Enable maximum performance mode? (recommended for benchmarking) (y/n) " -n 1 -r
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo -e "${BLUE}Setting maximum performance mode...${NC}"
-            sudo nvpmodel -m 0
-            sudo jetson_clocks
-            echo -e "${GREEN}✓ Performance mode enabled${NC}"
-            echo "  Note: This will increase power consumption and heat"
-        fi
-    else
-        echo -e "${YELLOW}⚠ nvpmodel not found - cannot configure power mode${NC}"
-    fi
-    
-    echo ""
-fi
-
-# ============================================================================
-# Build Selection
-# ============================================================================
 
 echo -e "${BLUE}Select build configuration:${NC}"
 echo "  1) Standard (Sequential + OpenMP)"
@@ -240,10 +167,6 @@ if [ -z "$BUILD_OPTION" ]; then
 fi
 
 echo ""
-
-# ============================================================================
-# Build Process
-# ============================================================================
 
 echo -e "${BLUE}Building project...${NC}"
 
@@ -310,12 +233,6 @@ case $BUILD_OPTION in
             BUILD_SUCCESS=true
         fi
         
-        if [ "$MPI_AVAILABLE" = true ]; then
-            echo ""
-            echo -e "${BLUE}Building MPI version...${NC}"
-            make mpi
-        fi
-        
         if [ "$CUDA_AVAILABLE" = true ]; then
             echo ""
             echo -e "${BLUE}Building CUDA version...${NC}"
@@ -342,25 +259,6 @@ fi
 
 echo ""
 
-# ============================================================================
-# GPU Information
-# ============================================================================
-
-if [ "$CUDA_AVAILABLE" = true ]; then
-    echo -e "${CYAN}GPU Information:${NC}"
-    if command -v nvidia-smi &> /dev/null; then
-        nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader
-    else
-        echo "  nvidia-smi not available"
-        echo "  GPU: CUDA-capable device detected"
-    fi
-    echo ""
-fi
-
-# ============================================================================
-# Build Summary
-# ============================================================================
-
 echo -e "${BLUE}================================================${NC}"
 echo -e "${GREEN}Build Complete!${NC}"
 echo -e "${BLUE}================================================${NC}"
@@ -380,7 +278,7 @@ if [ -f "./particle_sim_mpi" ]; then
 fi
 
 if [ -f "./particle_sim_cuda" ]; then
-    echo -e "  ${GREEN}✓${NC} ./particle_sim_cuda (+ GPU) ${CYAN}← Recommended${NC}"
+    echo -e "  ${GREEN}✓${NC} ./particle_sim_cuda (+ GPU) ${CYAN}<- Recommended${NC}"
     EXECUTABLES_FOUND=true
 fi
 
@@ -389,69 +287,16 @@ if [ -f "./particle_sim_full" ]; then
     EXECUTABLES_FOUND=true
 fi
 
-if [ "$EXECUTABLES_FOUND" = false ]; then
-    echo -e "  ${RED}No executables found - build may have failed${NC}"
-fi
-
-echo ""
-echo "To run:"
-
-if [ -f "./particle_sim_cuda" ]; then
-    echo -e "  ${CYAN}./particle_sim_cuda${NC}               # GPU version (recommended)"
-fi
-
-if [ -f "./particle_sim" ]; then
-    echo -e "  ${CYAN}./particle_sim${NC}                    # Standard version"
-fi
-
-if [ -f "./particle_sim_mpi" ]; then
-    echo -e "  ${CYAN}mpirun -np 4 ./particle_sim_mpi${NC}  # MPI version (4 processes)"
-fi
-
-if [ -f "./particle_sim_full" ]; then
-    echo -e "  ${CYAN}mpirun -np 4 ./particle_sim_full${NC} # Full version (all modes)"
-fi
-
 echo ""
 echo -e "${CYAN}Controls:${NC}"
 echo "  [1-5] Switch parallelization modes"
 echo "  [M]   Toggle menu"
 echo "  [+/-] Add/remove particles"
+echo "  [UP/DOWN] or [Scroll] Adjust mouse force"
+echo "  [LMB] Attract (hold and drag)"
+echo "  [RMB] Repel (hold and drag)"
 echo "  [R]   Reset simulation"
 echo "  [ESC] Exit"
 
-if [ "$PLATFORM" = "jetson" ]; then
-    echo ""
-    echo -e "${CYAN}Jetson Tips:${NC}"
-    echo "  • Press '5' for GPU Complex mode (fastest)"
-    echo "  • Monitor temperature with: tegrastats"
-    echo "  • Ensure cooling is adequate"
-    echo "  • Start with few particles and increase gradually"
-fi
-
 echo ""
 echo -e "${GREEN}Setup complete! Ready to run.${NC}"
-
-# ============================================================================
-# Post-Build Verification
-# ============================================================================
-
-echo ""
-read -p "Run a quick test? (y/n) " -n 1 -r
-echo ""
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    if [ -f "./particle_sim_cuda" ]; then
-        echo -e "${BLUE}Launching particle_sim_cuda for 5 seconds...${NC}"
-        timeout 5 ./particle_sim_cuda || true
-    elif [ -f "./particle_sim" ]; then
-        echo -e "${BLUE}Launching particle_sim for 5 seconds...${NC}"
-        timeout 5 ./particle_sim || true
-    fi
-    echo -e "${GREEN}✓ Test complete${NC}"
-fi
-
-echo ""
-echo -e "${BLUE}For more information, see:${NC}"
-echo "  README.md - Project overview"
-echo "  JETSON_INSTALLATION.md - Complete Jetson setup guide"
-echo "  DOCUMENTATION.md - Technical details"
