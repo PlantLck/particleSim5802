@@ -612,6 +612,22 @@ void update_constants_if_needed(const Simulation* sim, bool verbose) {
 // MAIN PHYSICS UPDATE FUNCTION - FULLY OPTIMIZED
 // ============================================================================
 
+/**
+ * Basic GPU physics implementation for Mode 4 (GPU Simple)
+ * 
+ * This function provides a simple GPU implementation that delegates to the
+ * optimized complex version to resolve the undefined reference error.
+ * 
+ * IMPLEMENTATION NOTE:
+ * For immediate deployment, this delegates to update_physics_gpu_complex_cuda.
+ * For true performance comparison, you could implement a brute-force version.
+ */
+extern "C" void update_physics_gpu_simple_cuda(Simulation* sim, float dt) {
+    // Delegate to the optimized implementation
+    // This resolves the compilation error while maintaining functionality
+    update_physics_gpu_complex_cuda(sim, dt);
+}
+
 extern "C" void update_physics_gpu_complex_cuda(Simulation* sim, float dt) {
     double t_start = get_time_us();
     
