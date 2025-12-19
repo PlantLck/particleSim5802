@@ -1,5 +1,5 @@
 #!/bin/bash
-# Automated Build and Setup Script for Parallel Particle Simulation (C++)
+# Automated Build and Setup Script for Parallel Particle Simulation
 # Linux and NVIDIA Jetson platforms only
 
 set -e
@@ -10,12 +10,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 echo -e "${BLUE}================================================${NC}"
-echo -e "${BLUE}Parallel Particle Simulation - C++ Version${NC}"
-echo -e "${BLUE}Build and Setup Script${NC}"
-echo -e "${BLUE}Linux and Jetson Platforms${NC}"
+echo -e "${BLUE}Parallel Particle Simulation - Build Script${NC}"
 echo -e "${BLUE}================================================${NC}"
 echo ""
 
@@ -79,7 +77,6 @@ echo ""
 
 echo "Checking for required tools..."
 
-# Check for C++ compiler
 if command -v g++ &> /dev/null; then
     GCC_VERSION=$(g++ --version | head -n1)
     echo -e "${GREEN}✓ g++ found: $GCC_VERSION${NC}"
@@ -89,7 +86,6 @@ else
     exit 1
 fi
 
-# Check for make
 if command -v make &> /dev/null; then
     MAKE_VERSION=$(make --version | head -n1)
     echo -e "${GREEN}✓ make found: $MAKE_VERSION${NC}"
@@ -132,7 +128,6 @@ else
     echo -e "${YELLOW}⚠ SDL2_ttf not found${NC}"
 fi
 
-# Offer to install if missing
 if [ "$SDL2_FOUND" = false ] || [ "$SDL2_TTF_FOUND" = false ]; then
     echo ""
     echo -e "${YELLOW}Required dependencies are missing.${NC}"
@@ -160,7 +155,6 @@ echo "Checking for optional features..."
 MPI_AVAILABLE=false
 CUDA_AVAILABLE=false
 
-# Check for MPI
 if command -v mpic++ &> /dev/null; then
     MPI_VERSION=$(mpic++ --version | head -n1)
     echo -e "${GREEN}✓ MPI found: $MPI_VERSION${NC}"
@@ -170,13 +164,11 @@ else
     echo -e "  Install with: ${CYAN}sudo apt-get install libopenmpi-dev openmpi-bin${NC}"
 fi
 
-# Check for CUDA
 if command -v nvcc &> /dev/null; then
     CUDA_VERSION=$(nvcc --version | grep "release" | awk '{print $5}' | sed 's/,//')
     echo -e "${GREEN}✓ CUDA found: version $CUDA_VERSION${NC}"
     CUDA_AVAILABLE=true
     
-    # Additional CUDA info for Jetson
     if [ "$PLATFORM" = "jetson" ]; then
         CUDA_PATH=$(which nvcc | sed 's|/bin/nvcc||')
         echo -e "  CUDA Path: $CUDA_PATH"
@@ -189,7 +181,6 @@ else
     fi
 fi
 
-# Check OpenMP support
 if echo | g++ -fopenmp -x c++ -E - &> /dev/null; then
     echo -e "${GREEN}✓ OpenMP support detected${NC}"
 else
@@ -205,7 +196,6 @@ echo ""
 if [ "$PLATFORM" = "jetson" ]; then
     echo -e "${CYAN}Jetson Performance Configuration${NC}"
     
-    # Check current power mode
     if command -v nvpmodel &> /dev/null; then
         CURRENT_MODE=$(sudo nvpmodel -q 2>/dev/null | grep "NV Power Mode" | awk '{print $NF}')
         echo "  Current power mode: $CURRENT_MODE"
@@ -239,7 +229,6 @@ echo "  4) Full build (MPI + CUDA)"
 echo "  5) All available features (auto-detect)"
 echo ""
 
-# Default to option 5 for automated builds
 if [ -z "$BUILD_OPTION" ]; then
     if [ "$PLATFORM" = "jetson" ] && [ "$CUDA_AVAILABLE" = true ]; then
         echo -e "${CYAN}Auto-selecting option 3 (CUDA) for Jetson platform${NC}"
@@ -258,7 +247,6 @@ echo ""
 
 echo -e "${BLUE}Building project...${NC}"
 
-# Clean previous builds
 make clean > /dev/null 2>&1 || true
 
 BUILD_SUCCESS=false
@@ -318,26 +306,22 @@ case $BUILD_OPTION in
     5)
         echo -e "${BLUE}Auto-detecting and building all available features...${NC}"
         
-        # Build standard version
         if make; then
             BUILD_SUCCESS=true
         fi
         
-        # Build MPI version if available
         if [ "$MPI_AVAILABLE" = true ]; then
             echo ""
             echo -e "${BLUE}Building MPI version...${NC}"
             make mpi
         fi
         
-        # Build CUDA version if available (recommended for Jetson)
         if [ "$CUDA_AVAILABLE" = true ]; then
             echo ""
             echo -e "${BLUE}Building CUDA version...${NC}"
             make cuda
         fi
         
-        # Build full version if both available
         if [ "$MPI_AVAILABLE" = true ] && [ "$CUDA_AVAILABLE" = true ]; then
             echo ""
             echo -e "${BLUE}Building full version (MPI + CUDA)...${NC}"
