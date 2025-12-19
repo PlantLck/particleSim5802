@@ -136,7 +136,7 @@ int main(int argc, char* argv[]) {
             }
             
             Application app(DEFAULT_PARTICLE_COUNT);
-            int result = app.run();
+            app.run();
             cleanup_graphics();
             
 #ifdef USE_MPI
