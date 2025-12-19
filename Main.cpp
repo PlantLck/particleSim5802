@@ -7,7 +7,6 @@
 #include <mpi.h>
 #endif
 
-// External rendering functions
 extern "C" {
     bool init_graphics();
     void cleanup_graphics();
@@ -16,7 +15,6 @@ extern "C" {
     void toggle_stats();
 }
 
-// Input handling
 class InputHandler {
 public:
     static void handle_keyboard(const SDL_KeyboardEvent& event, Simulation& sim, bool& quit) {
@@ -42,6 +40,14 @@ public:
             case SDLK_MINUS:
                 sim.remove_particles(50);
                 break;
+            case SDLK_UP:
+                sim.adjust_mouse_force(MOUSE_FORCE_STEP);
+                std::cout << "Mouse force: " << sim.get_mouse_force() << std::endl;
+                break;
+            case SDLK_DOWN:
+                sim.adjust_mouse_force(-MOUSE_FORCE_STEP);
+                std::cout << "Mouse force: " << sim.get_mouse_force() << std::endl;
+                break;
             case SDLK_1:
                 sim.set_mode(ParallelMode::SEQUENTIAL);
                 std::cout << "Switched to Sequential mode\n";
@@ -51,41 +57,73 @@ public:
                 std::cout << "Switched to Multithreaded mode\n";
                 break;
             case SDLK_3:
+#ifdef USE_MPI
                 sim.set_mode(ParallelMode::MPI);
                 std::cout << "Switched to MPI mode\n";
+#else
+                std::cout << "MPI mode not available (not compiled with MPI support)\n";
+#endif
                 break;
             case SDLK_4:
+#ifdef USE_CUDA
                 sim.set_mode(ParallelMode::GPU_SIMPLE);
                 std::cout << "Switched to GPU Simple mode\n";
+#else
+                std::cout << "GPU mode not available (not compiled with CUDA support)\n";
+#endif
                 break;
             case SDLK_5:
+#ifdef USE_CUDA
                 sim.set_mode(ParallelMode::GPU_COMPLEX);
                 std::cout << "Switched to GPU Complex mode\n";
+#else
+                std::cout << "GPU mode not available (not compiled with CUDA support)\n";
+#endif
                 break;
         }
     }
     
-    static void handle_mouse(const SDL_MouseButtonEvent& event, Simulation& sim) {
+    static void handle_mouse_button(const SDL_MouseButtonEvent& event, Simulation& sim) {
         if (event.type == SDL_MOUSEBUTTONDOWN) {
             bool attract = (event.button == SDL_BUTTON_LEFT);
             sim.set_mouse_state(event.x, event.y, true, attract);
         } else if (event.type == SDL_MOUSEBUTTONUP) {
-            sim.set_mouse_state(0, 0, false, false);
+            sim.set_mouse_state(sim.get_mouse_x(), sim.get_mouse_y(), false, sim.is_mouse_attract());
         }
+    }
+    
+    static void handle_mouse_motion(const SDL_MouseMotionEvent& event, Simulation& sim) {
+        if (sim.is_mouse_pressed()) {
+            sim.update_mouse_position(event.x, event.y);
+        }
+    }
+    
+    static void handle_mouse_wheel(const SDL_MouseWheelEvent& event, Simulation& sim) {
+        if (event.y > 0) {
+            sim.adjust_mouse_force(MOUSE_FORCE_STEP);
+        } else if (event.y < 0) {
+            sim.adjust_mouse_force(-MOUSE_FORCE_STEP);
+        }
+        std::cout << "Mouse force: " << sim.get_mouse_force() << std::endl;
     }
 };
 
-// Main application
 class Application {
 private:
     Simulation sim;
     bool quit;
+    double fps_accumulator;
+    int fps_frame_count;
+    double last_fps_update;
     
 public:
-    Application(int particle_count) : sim(particle_count), quit(false) {}
+    Application(int particle_count) : sim(particle_count), quit(false),
+                                      fps_accumulator(0.0), fps_frame_count(0),
+                                      last_fps_update(0.0) {}
     
     int run() {
         auto last_time = std::chrono::high_resolution_clock::now();
+        last_fps_update = Utils::get_time_ms();
         
         while (!quit) {
             auto current_time = std::chrono::high_resolution_clock::now();
@@ -94,21 +132,49 @@ public:
             
             if (dt > 0.05f) dt = 0.05f;
             
-            // Handle events
             SDL_Event event;
             while (SDL_PollEvent(&event)) {
-                if (event.type == SDL_QUIT) {
-                    quit = true;
-                } else if (event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) {
-                    InputHandler::handle_keyboard(event.key, sim, quit);
-                } else if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_MOUSEBUTTONUP) {
-                    InputHandler::handle_mouse(event.button, sim);
+                switch (event.type) {
+                    case SDL_QUIT:
+                        quit = true;
+                        break;
+                    case SDL_KEYDOWN:
+                    case SDL_KEYUP:
+                        InputHandler::handle_keyboard(event.key, sim, quit);
+                        break;
+                    case SDL_MOUSEBUTTONDOWN:
+                    case SDL_MOUSEBUTTONUP:
+                        InputHandler::handle_mouse_button(event.button, sim);
+                        break;
+                    case SDL_MOUSEMOTION:
+                        InputHandler::handle_mouse_motion(event.motion, sim);
+                        break;
+                    case SDL_MOUSEWHEEL:
+                        InputHandler::handle_mouse_wheel(event.wheel, sim);
+                        break;
                 }
             }
             
-            // Update and render
+            double frame_start = Utils::get_time_ms();
+            
             sim.update(dt);
+            
+            SystemMonitor::update_metrics(sim);
+            
             render_frame(&sim);
+            
+            double frame_end = Utils::get_time_ms();
+            sim.set_frame_time(frame_end - frame_start);
+            
+            fps_frame_count++;
+            double current_ms = Utils::get_time_ms();
+            if (current_ms - last_fps_update >= 500.0) {
+                double elapsed = (current_ms - last_fps_update) / 1000.0;
+                double fps = fps_frame_count / elapsed;
+                sim.set_fps(fps);
+                fps_frame_count = 0;
+                last_fps_update = current_ms;
+            }
         }
         
         std::cout << "Simulation terminated successfully\n";
@@ -116,7 +182,6 @@ public:
     }
 };
 
-// Main entry point
 int main(int argc, char* argv[]) {
     try {
 #ifdef USE_MPI
@@ -136,12 +201,11 @@ int main(int argc, char* argv[]) {
             }
             
             Application app(DEFAULT_PARTICLE_COUNT);
-            (void)app.run();  // Explicitly ignore return value to suppress warning
+            app.run();
             cleanup_graphics();
             
 #ifdef USE_MPI
         } else {
-            // Non-graphics ranks for MPI
             Simulation sim(DEFAULT_PARTICLE_COUNT);
             sim.set_mode(ParallelMode::MPI);
             
